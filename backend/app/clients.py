@@ -6,9 +6,16 @@ provider. This keeps council.py and ingestion.py provider-agnostic.
 """
 
 import os
+from pathlib import Path
 from functools import lru_cache
+
+from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+# Load the .env file from the project root
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+print("GROQ_API_KEY =", os.getenv("GROQ_API_KEY"))
 PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     "nvidia_nim": "https://integrate.api.nvidia.com/v1",
