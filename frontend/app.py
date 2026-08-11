@@ -988,7 +988,7 @@ with st.sidebar:
     st.markdown("### // Config")
     backend_url = st.text_input(
         "Backend endpoint",
-        value=st.session_state.get("backend_url", "http://localhost:8000"),
+        value=st.session_state.get("backend_url", "https://ai-council-t8zv.onrender.com"),
         help="Base URL for the FastAPI service. Requests are sent to /ask.",
     ).rstrip("/")
     st.session_state.backend_url = backend_url
