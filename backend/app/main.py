@@ -42,6 +42,7 @@ async def ask(
     files: list[UploadFile] = File(default=[]),
     # Keep the original field working for older clients during the transition.
     file: Optional[UploadFile] = File(None),
+    debate: bool = Form(True),
 ):
     if not prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
@@ -97,7 +98,7 @@ async def ask(
             raise HTTPException(status_code=502, detail=f"Failed to process file: {e}")
 
     try:
-        result = await run_council(prompt, context=context)
+        result = await run_council(prompt, context=context, debate=debate)
     except Exception as e:
         logger.exception("Council run failed")
         raise HTTPException(status_code=502, detail=str(e))

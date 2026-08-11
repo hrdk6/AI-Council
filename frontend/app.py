@@ -1,4 +1,5 @@
 import html
+import json
 import re
 from typing import Any
 import requests
@@ -1086,26 +1087,16 @@ prompt = st.text_area(
     placeholder="Describe the decision, scenario, or strategic question for the council to examine...",
 )
 
-upload_col, hint_col = st.columns([1.1, 1], gap="large")
-with upload_col:
-    uploaded_files = st.file_uploader(
-        "Supporting material (up to 5 files)",
-        type=["pdf", "png", "jpg", "jpeg", "webp"],
-        help="Add up to five PDFs or images. They will be considered by all council nodes.",
-        accept_multiple_files=True,
-    )
-
-with hint_col:
-    st.markdown(
-        """
-        <div class="form-hint">
-            <strong>How it works</strong><br>
-            Frame → Analyze → Challenge → Direct<br><br>
-            The council identifies decision criteria, stress-tests assumptions, and surfaces a final directive with explicit guardrails and reversal conditions.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    """
+    <div class="form-hint">
+        <strong>How it works</strong><br>
+        Frame → Analyze → Challenge → Direct<br><br>
+        The council identifies decision criteria, stress-tests assumptions, and surfaces a final directive with explicit guardrails and reversal conditions.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Primary action
@@ -1122,30 +1113,21 @@ if ask_clicked:
         st.session_state.council_result = None
         st.session_state.council_prompt = prompt
 
-        files = [
-            (
-                "files",
-                (
-                    uploaded_file.name,
-                    uploaded_file.getvalue(),
-                    uploaded_file.type or "application/octet-stream",
-                ),
-            )
-            for uploaded_file in uploaded_files
-        ]
-
         try:
-            with st.spinner("Council nodes are processing your brief — estimated 60–120 seconds…"):
+            payload = None
+            with st.status("Council nodes are processing your brief...", expanded=True) as status:
+                st.write("Initializing deliberation...")
                 response = requests.post(
                     f"{backend_url}/ask",
-                    data={"prompt": prompt},
-                    files=files or None,
-                    timeout=(10, 240),
+                    data={"prompt": prompt, "debate": True},
+                    timeout=(10, 240)
                 )
                 response.raise_for_status()
+                
                 payload = response.json()
+                status.update(label="Deliberation complete!", state="complete")
 
-            if not isinstance(payload, dict) or not payload.get("final_answer"):
+            if not payload or not isinstance(payload, dict) or not payload.get("final_answer"):
                 raise ValueError("The backend returned an incomplete council response.")
 
             st.session_state.council_result = payload

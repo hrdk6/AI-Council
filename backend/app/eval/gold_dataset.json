@@ -1,0 +1,35 @@
+{
+  "description": "Seed dataset for evaluating the council against baseline single-model answers. There is no single 'correct' answer for a decision prompt, so this is scored on process quality (see run_eval.py: latency, council size chosen, agreement/confidence scores, whether debate ran) rather than exact-match correctness. Extend this file with prompts representative of your real users before drawing conclusions.",
+  "cases": [
+    {
+      "id": "eng-01",
+      "prompt": "Our monolith's deploy takes 40 minutes and a bad deploy takes down the whole app. Should we split it into microservices now, or fix the deploy pipeline first?",
+      "expected_council_includes": ["engineer", "operator"],
+      "category": "engineering"
+    },
+    {
+      "id": "fin-01",
+      "prompt": "We can spend $40k on paid ads this quarter or hire a second sales rep. Which gets us to our revenue target faster?",
+      "expected_council_includes": ["finance", "analyst"],
+      "category": "finance"
+    },
+    {
+      "id": "sec-01",
+      "prompt": "A partner wants read access to our user database for an integration. Should we grant direct DB access or build an API layer first?",
+      "expected_council_includes": ["security", "engineer"],
+      "category": "security"
+    },
+    {
+      "id": "comms-01",
+      "prompt": "We need to lay off 8% of the team next month. How and when should we communicate this internally?",
+      "expected_council_includes": ["communicator", "risk"],
+      "category": "people"
+    },
+    {
+      "id": "amb-01",
+      "prompt": "Should I take the job offer or stay at my current company?",
+      "expected_council_includes": ["analyst", "risk"],
+      "category": "underspecified"
+    }
+  ]
+}

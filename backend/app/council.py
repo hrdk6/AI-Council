@@ -1,11 +1,25 @@
 import asyncio
+import hashlib
+import json
 import logging
 import re
+import statistics
 import time
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
+from .cache import COUNCIL_RESULT_CACHE
 from .clients import get_client
-from .config import CHAIRMAN, COUNCIL_MEMBERS, DECISION_ARCHITECT, ModelConfig
+from .config import (
+    ANCHOR_EXPERTS,
+    CHAIRMAN,
+    DECISION_ARCHITECT,
+    DEFAULT_COUNCIL_KEYS,
+    EXPERT_LIBRARY,
+    MAX_COUNCIL_SIZE,
+    MIN_COUNCIL_SIZE,
+    ModelConfig,
+)
+from .observability import METRICS, StageTimer, new_request_id
 from .schemas import CouncilResult, MemberResponse
 
 logger = logging.getLogger("council")
@@ -14,22 +28,49 @@ MAX_RETRIES = 2  # Increased slightly since we are respecting retry-after header
 REQUEST_TIMEOUT = 35
 
 # Drastically reduced token counts to fit within Groq rate limits
-MEMBER_MAX_TOKENS = 275
-CHARTER_MAX_TOKENS = 350
-CHAIR_MAX_TOKENS = 550
+MEMBER_MAX_TOKENS = 480
+CHARTER_MAX_TOKENS = 500
+CHAIR_MAX_TOKENS = 1400
 MAX_PROMPT_CHARS = 12_000
 MAX_CONTEXT_CHARS = 28_000
 
+# Consensus is "high enough to skip the challenge round" when members mostly
+# agree (tight confidence spread) AND are themselves confident. Either
+# condition failing means there's something worth debating.
+SKIP_DEBATE_AGREEMENT_THRESHOLD = 0.85
+SKIP_DEBATE_CONFIDENCE_THRESHOLD = 0.6
+
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _RETRY_AFTER_RE = re.compile(r"try again in ([0-9.]+)s", re.IGNORECASE)
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+_COUNCIL_LINE_RE = re.compile(r"^Council:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+
+EventCallback = Optional[Callable[[str, dict], Awaitable[None]]]
+
+
+async def _emit(on_event: EventCallback, event: str, data: dict) -> None:
+    if on_event is not None:
+        try:
+            await on_event(event, data)
+        except Exception:
+            logger.warning("on_event callback raised for event '%s'", event, exc_info=True)
 
 
 def _strip_think_tags(text: Optional[str]) -> str:
-    """Never return model scratchpad text to other models or the API client."""
+    """Never return model scratchpad text to other models or the API client.
+    Returns empty string if the entire response was scratchpad (e.g. truncated
+    inside a <think> block) — callers must handle the empty-string case rather
+    than falling back to the raw text, which would expose the thinking."""
     if not text:
         return ""
+    # Remove closed <think>...</think> blocks first.
     cleaned = _THINK_TAG_RE.sub("", text).strip()
-    return cleaned or text.strip()
+    # Remove any remaining unclosed <think> block (model ran out of tokens
+    # while thinking and never wrote </think> or the real answer).
+    cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL | re.IGNORECASE).strip()
+    # Do NOT fall back to raw text: if cleaned is empty the whole response was
+    # scratchpad and we must signal that to the caller, not leak the thinking.
+    return cleaned
 
 
 def _clip(text: str, limit: int, label: str) -> str:
@@ -38,14 +79,60 @@ def _clip(text: str, limit: int, label: str) -> str:
     return f"{text[:limit]}\n\n[{label} truncated to protect the decision context window.]"
 
 
+def _parse_structured_member_output(raw_text: str) -> dict:
+    """Members are asked to answer as strict JSON so the chair (and the UI)
+    gets a comparable recommendation/confidence/risk instead of free prose.
+    Models don't always comply perfectly, so this degrades gracefully: any
+    parse failure just falls back to treating the whole reply as the
+    rationale with no numeric confidence, rather than failing the member."""
+    candidate = _JSON_FENCE_RE.sub("", raw_text.strip()).strip()
+    # Some models add a sentence before/after the JSON object; grab the
+    # outermost {...} block if the whole string isn't valid JSON on its own.
+    if not candidate.startswith("{"):
+        brace_match = re.search(r"\{.*\}", candidate, re.DOTALL)
+        if brace_match:
+            candidate = brace_match.group(0)
+
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        return {"recommendation": None, "confidence": None, "key_risk": None, "rationale": raw_text.strip()}
+
+    confidence = parsed.get("confidence")
+    try:
+        confidence = float(confidence) if confidence is not None else None
+        if confidence is not None:
+            confidence = max(0.0, min(1.0, confidence))
+    except (TypeError, ValueError):
+        confidence = None
+
+    rationale = parsed.get("rationale") or raw_text.strip()
+    return {
+        "recommendation": parsed.get("recommendation"),
+        "confidence": confidence,
+        "key_risk": parsed.get("key_risk"),
+        "rationale": rationale,
+    }
+
+
+_STRUCTURED_OUTPUT_INSTRUCTION = (
+    "\n\nRespond ONLY with a single strict JSON object, no markdown fences and no text outside "
+    "the braces, matching exactly this shape:\n"
+    '{"recommendation": "<one sentence>", "confidence": <float 0.0-1.0>, '
+    '"key_risk": "<one sentence>", "rationale": "<your full reasoning, this is what gets shown>"}'
+)
+
+
 async def _call_text(
         label: str,
         cfg: ModelConfig,
         user_prompt: str,
         *,
         max_tokens: int,
-) -> str:
-    """Call one model with bounded retries and explicit rate-limit parsing."""
+        request_id: str = "-",
+) -> tuple[str, int]:
+    """Call one model with bounded retries and explicit rate-limit parsing.
+    Returns (response_text, tokens_used)."""
     last_error: Optional[Exception] = None
 
     for attempt in range(MAX_RETRIES + 1):
@@ -63,17 +150,18 @@ async def _call_text(
             text = _strip_think_tags(response.choices[0].message.content)
             if not text:
                 raise RuntimeError("Provider returned an empty response.")
-            logger.info(
-                "[%s] %s/%s completed in %.2fs",
-                label,
-                cfg.provider,
-                cfg.model,
-                time.perf_counter() - started,
-            )
-            return text
+            latency = time.perf_counter() - started
+            tokens = 0
+            if getattr(response, "usage", None) is not None:
+                tokens = getattr(response.usage, "total_tokens", 0) or 0
+            logger.info("[%s][%s] %s/%s completed in %.2fs", request_id, label, cfg.provider, cfg.model, latency)
+            METRICS.record_llm_call(cfg.provider, tokens, latency, success=True)
+            return text, tokens
         except Exception as error:
             last_error = error
             error_str = str(error)
+            latency = time.perf_counter() - started
+            METRICS.record_llm_call(cfg.provider, 0, latency, success=False)
 
             # Check if the provider gave us an exact wait time (common with Groq 429s)
             match = _RETRY_AFTER_RE.search(error_str)
@@ -83,13 +171,8 @@ async def _call_text(
                 wait_time = 1.25 * (attempt + 1)
 
             logger.warning(
-                "[%s] attempt %d/%d failed after %.2fs. Waiting %.2fs: %s",
-                label,
-                attempt + 1,
-                MAX_RETRIES + 1,
-                time.perf_counter() - started,
-                wait_time,
-                error,
+                "[%s][%s] attempt %d/%d failed after %.2fs. Waiting %.2fs: %s",
+                request_id, label, attempt + 1, MAX_RETRIES + 1, latency, wait_time, error,
             )
             if attempt < MAX_RETRIES:
                 await asyncio.sleep(wait_time)
@@ -98,21 +181,29 @@ async def _call_text(
 
 
 async def call_member(
-        key: str, cfg: ModelConfig, user_prompt: str, round_num: int
+        key: str, cfg: ModelConfig, user_prompt: str, round_num: int, request_id: str = "-"
 ) -> MemberResponse:
     """A failed member stays visible in the audit trail but never aborts the council."""
+    started = time.perf_counter()
     try:
-        content = await _call_text(
-            f"{key} round {round_num}", cfg, user_prompt, max_tokens=MEMBER_MAX_TOKENS
+        raw_text, tokens = await _call_text(
+            f"{key} round {round_num}", cfg, user_prompt + _STRUCTURED_OUTPUT_INSTRUCTION,
+            max_tokens=MEMBER_MAX_TOKENS, request_id=request_id,
         )
+        structured = _parse_structured_member_output(raw_text)
         return MemberResponse(
             key=key,
             role_name=cfg.role_name,
             model=cfg.model,
             provider=cfg.provider,
-            content=content,
+            content=structured["rationale"],
+            recommendation=structured["recommendation"],
+            confidence=structured["confidence"],
+            key_risk=structured["key_risk"],
             success=True,
             round=round_num,
+            latency_s=round(time.perf_counter() - started, 2),
+            tokens_used=tokens,
         )
     except Exception as error:
         return MemberResponse(
@@ -123,6 +214,7 @@ async def call_member(
             success=False,
             error=str(error),
             round=round_num,
+            latency_s=round(time.perf_counter() - started, 2),
         )
 
 
@@ -138,34 +230,76 @@ def _source_brief(prompt: str, context: Optional[str]) -> str:
     )
 
 
-async def _build_decision_charter(source_brief: str) -> str:
-    """Establish a common objective and criteria before opinions are collected."""
+def _select_council(charter_text: str) -> list[str]:
+    """Parse the Decision Architect's 'Council: a, b, c' line into a
+    validated list of EXPERT_LIBRARY keys. Falls back to the safe default
+    four-member panel on any parsing or validation failure — a malformed
+    council selection should never be the reason a request fails."""
+    match = _COUNCIL_LINE_RE.search(charter_text)
+    if not match:
+        return list(DEFAULT_COUNCIL_KEYS)
+
+    candidates = [key.strip().lower() for key in match.group(1).split(",")]
+    selected = [key for key in candidates if key in EXPERT_LIBRARY]
+    for anchor in ANCHOR_EXPERTS:
+        if anchor not in selected:
+            selected.append(anchor)
+
+    # De-dupe while preserving order.
+    seen = set()
+    ordered = [key for key in selected if not (key in seen or seen.add(key))]
+
+    if len(ordered) < MIN_COUNCIL_SIZE:
+        for key in DEFAULT_COUNCIL_KEYS:
+            if key not in ordered:
+                ordered.append(key)
+            if len(ordered) >= MIN_COUNCIL_SIZE:
+                break
+    return ordered[:MAX_COUNCIL_SIZE]
+
+
+async def _build_decision_charter(source_brief: str, request_id: str) -> tuple[str, list[str]]:
+    """Establish a common objective, criteria, AND council composition before
+    opinions are collected. Returns (charter_text, selected_expert_keys)."""
     try:
-        return await _call_text(
+        charter_text, _ = await _call_text(
             "decision charter",
             DECISION_ARCHITECT,
             f"Create the decision charter for this material.\n\n{source_brief}",
             max_tokens=CHARTER_MAX_TOKENS,
+            request_id=request_id,
         )
+        return charter_text, _select_council(charter_text)
     except Exception as error:
-        logger.warning("Decision charter unavailable; using a minimal charter: %s", error)
-        return (
+        logger.warning("[%s] Decision charter unavailable; using a minimal charter: %s", request_id, error)
+        fallback_charter = (
             "Decision: Respond to the user's request.\n"
             "Objective: Maximize expected usefulness while respecting stated constraints.\n"
             "Constraints: Use only the supplied material and state uncertainty.\n"
             "Evaluation criteria (ordered): Safety and reversibility; evidence quality; practical value.\n"
             "Material facts: See the user request and attached material.\n"
             "Unknowns: Anything not established in the supplied material.\n"
-            "Safety guardrails: Do not invent facts; prefer a bounded next step when a critical unknown remains."
+            "Safety guardrails: Do not invent facts; prefer a bounded next step when a critical unknown remains.\n"
+            f"Council: {', '.join(DEFAULT_COUNCIL_KEYS)}"
         )
+        return fallback_charter, list(DEFAULT_COUNCIL_KEYS)
 
 
 def _format_positions(responses: list[MemberResponse]) -> str:
-    return "\n\n".join(
-        f"### {response.role_name}\n{response.content}"
-        for response in responses
-        if response.success and response.content
-    )
+    blocks = []
+    for response in responses:
+        if not (response.success and response.content):
+            continue
+        confidence_str = f"{response.confidence:.2f}" if response.confidence is not None else "n/a"
+        header = f"### {response.role_name} (self-reported confidence: {confidence_str})"
+        lines = [header]
+        if response.recommendation:
+            lines.append(f"Recommendation: {response.recommendation}")
+        if response.key_risk:
+            lines.append(f"Key risk: {response.key_risk}")
+        lines.append(response.content)
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def _latest_position_per_member(
@@ -176,11 +310,55 @@ def _latest_position_per_member(
     return [revised_by_key.get(item.key, item) for item in round1 if item.success and item.content]
 
 
+def _score_consensus(responses: list[MemberResponse]) -> tuple[Optional[float], Optional[float]]:
+    """Cheap, honest consensus signal computed from members' own self-reported
+    confidence — NOT semantic agreement between their recommendations (that
+    would need another LLM call to judge, which defeats the point of a
+    cheap adaptive-debate gate). confidence_score is the mean self-reported
+    confidence; agreement_score shrinks as those confidences spread apart."""
+    confidences = [r.confidence for r in responses if r.success and r.confidence is not None]
+    if len(confidences) < 2:
+        return None, None
+    confidence_score = statistics.mean(confidences)
+    spread = statistics.pstdev(confidences)
+    agreement_score = max(0.0, 1.0 - (spread / 0.5))
+    return round(confidence_score, 3), round(agreement_score, 3)
+
+
+def _cache_key(prompt: str, context: Optional[str]) -> str:
+    payload = f"{prompt.strip()}||{(context or '').strip()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 async def run_council(
-        prompt: str, context: Optional[str] = None, debate: bool = True
+        prompt: str,
+        context: Optional[str] = None,
+        debate: bool = True,
+        use_cache: bool = True,
+        on_event: EventCallback = None,
 ) -> CouncilResult:
+    request_id = new_request_id()
+    started_total = time.perf_counter()
+
+    cache_key = _cache_key(prompt, context)
+    if use_cache:
+        cached = COUNCIL_RESULT_CACHE.get(cache_key)
+        if cached is not None:
+            logger.info("[%s] cache hit for this prompt/context pair", request_id)
+            METRICS.record_request(success=True, cached=True)
+            await _emit(on_event, "cache_hit", {"request_id": request_id})
+            result = cached.model_copy(update={"request_id": request_id, "cached": True})
+            await _emit(on_event, "final", result.model_dump())
+            return result
+
     source_brief = _source_brief(prompt, context)
-    decision_charter = await _build_decision_charter(source_brief)
+
+    with StageTimer(request_id, "decision charter"):
+        decision_charter, council_keys = await _build_decision_charter(source_brief, request_id)
+    council = {key: EXPERT_LIBRARY[key] for key in council_keys}
+    await _emit(on_event, "charter_ready", {
+        "request_id": request_id, "decision_charter": decision_charter, "council": council_keys,
+    })
 
     round1_prompt = (
         "You are one member of an independent decision council.\n\n"
@@ -192,19 +370,40 @@ async def run_council(
     round1 = list(
         await asyncio.gather(
             *[
-                call_member(key, config, round1_prompt, round_num=1)
-                for key, config in COUNCIL_MEMBERS.items()
+                call_member(key, config, round1_prompt, round_num=1, request_id=request_id)
+                for key, config in council.items()
             ]
         )
     )
-    logger.info("Round 1 completed in %.2fs", time.perf_counter() - started)
+    logger.info("[%s] Round 1 completed in %.2fs", request_id, time.perf_counter() - started)
+    for member in round1:
+        await _emit(on_event, "member_done", {"request_id": request_id, **member.model_dump()})
 
     successful_round1 = [response for response in round1 if response.success]
     if not successful_round1:
+        METRICS.record_request(success=False, cached=False)
         raise RuntimeError("No council member responded successfully. Check API keys and provider availability.")
 
+    confidence_score, agreement_score = _score_consensus(successful_round1)
+
     round2: list[MemberResponse] = []
-    if debate and len(successful_round1) > 1:
+    debate_skipped = False
+    should_debate = debate and len(successful_round1) > 1
+    if should_debate and agreement_score is not None and (
+            agreement_score >= SKIP_DEBATE_AGREEMENT_THRESHOLD
+            and (confidence_score or 0) >= SKIP_DEBATE_CONFIDENCE_THRESHOLD
+    ):
+        should_debate = False
+        debate_skipped = True
+        logger.info(
+            "[%s] Skipping challenge round: agreement=%.2f confidence=%.2f already above threshold",
+            request_id, agreement_score, confidence_score,
+        )
+        await _emit(on_event, "debate_skipped", {
+            "request_id": request_id, "agreement_score": agreement_score, "confidence_score": confidence_score,
+        })
+
+    if should_debate:
         def debate_prompt(member_key: str) -> str:
             peer_positions = _format_positions(
                 [response for response in successful_round1 if response.key != member_key]
@@ -221,21 +420,21 @@ async def run_council(
 
         started = time.perf_counter()
 
-        # Batching Round 2 to prevent simultaneous spikes on Groq limits
-        chunk_size = 2
-        for i in range(0, len(successful_round1), chunk_size):
-            chunk = successful_round1[i: i + chunk_size]
+        # Run debate round one member at a time to stay within per-model TPM limits.
+        for resp in successful_round1:
             chunk_results = await asyncio.gather(
-                *[
-                    call_member(resp.key, COUNCIL_MEMBERS[resp.key], debate_prompt(resp.key), round_num=2)
-                    for resp in chunk
-                ]
+                call_member(resp.key, council[resp.key], debate_prompt(resp.key), round_num=2, request_id=request_id)
             )
             round2.extend(chunk_results)
-            if i + chunk_size < len(successful_round1):
-                await asyncio.sleep(2.0)  # Brief delay between batches
+            for member in chunk_results:
+                await _emit(on_event, "member_done", {"request_id": request_id, **member.model_dump()})
+            await asyncio.sleep(3.0)  # Allow TPM quota to recover between members
 
-        logger.info("Challenge round completed in %.2fs", time.perf_counter() - started)
+        logger.info("[%s] Challenge round completed in %.2fs", request_id, time.perf_counter() - started)
+        # Recompute consensus from the latest (post-debate) positions.
+        confidence_score, agreement_score = _score_consensus(
+            _latest_position_per_member(round1, round2)
+        )
 
     positions_for_chair = _latest_position_per_member(round1, round2)
     positions_text = _format_positions(positions_for_chair)
@@ -250,20 +449,23 @@ async def run_council(
         f"LATEST COUNCIL POSITIONS:\n{positions_text}{availability_note}\n\n"
         "Issue one decision directive. Use these exact headings:\n"
         "Recommendation\nWhy this wins\nExecution plan\nGuardrails and reversal triggers\nConfidence and key uncertainty\n\n"
-        "Under Recommendation, make one concrete recommended action. Under Why this wins, evaluate it "
-        "against the charter's highest-priority criteria, rather than naming council members. Under "
+        "Under Recommendation, make ONE single, decisive recommended action. Do not say 'it depends' or offer a choice. "
+        "Under Why this wins, evaluate it against the charter's highest-priority criteria, rather than naming council members. Under "
         "Execution plan, give 3 ordered, practical next steps. Under Guardrails and reversal triggers, "
         "state what would make the recommendation unsafe or wrong and what to do then. Under Confidence "
         "and key uncertainty, state a calibrated confidence level and the single uncertainty that matters most. "
-        "Do not use false certainty, do not offer an unranked menu, and do not invent evidence."
+        "Do not use false certainty, do not offer an unranked menu, do not use <think> tags, and do not invent evidence."
     )
 
+    # Brief pause so per-model TPM quota has recovered before the chairman call.
+    await asyncio.sleep(4.0)
+
     try:
-        final_answer = await _call_text(
-            "chairman", CHAIRMAN, chair_prompt, max_tokens=CHAIR_MAX_TOKENS
+        final_answer, _ = await _call_text(
+            "chairman", CHAIRMAN, chair_prompt, max_tokens=CHAIR_MAX_TOKENS, request_id=request_id
         )
     except Exception as error:
-        logger.exception("Chairman failed: %s", error)
+        logger.exception("[%s] Chairman failed: %s", request_id, error)
         # Replacing the ugly raw markdown dump with a polished failure state
         final_answer = (
             "Recommendation\nDeliberation delayed due to temporary high system demand.\n\n"
@@ -274,10 +476,24 @@ async def run_council(
             "the council's findings due to upstream rate limits."
         )
 
-    return CouncilResult(
+    result = CouncilResult(
         question=prompt,
         decision_charter=decision_charter,
+        council_composition=council_keys,
         round1=round1,
         round2=round2,
+        agreement_score=agreement_score,
+        confidence_score=confidence_score,
+        debate_skipped=debate_skipped,
         final_answer=final_answer,
+        request_id=request_id,
+        total_latency_s=round(time.perf_counter() - started_total, 2),
+        cached=False,
     )
+
+    METRICS.record_request(success=True, cached=False)
+    if use_cache:
+        COUNCIL_RESULT_CACHE.set(cache_key, result)
+
+    await _emit(on_event, "final", result.model_dump())
+    return result

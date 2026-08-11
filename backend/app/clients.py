@@ -5,6 +5,7 @@ pointed at different base_urls instead of maintaining separate SDKs per
 provider. This keeps council.py and ingestion.py provider-agnostic.
 """
 
+import logging
 import os
 from pathlib import Path
 from functools import lru_cache
@@ -12,10 +13,11 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+logger = logging.getLogger("council")
+
 # Load the .env file from the project root
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-print("GROQ_API_KEY =", os.getenv("GROQ_API_KEY"))
 PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     "nvidia_nim": "https://integrate.api.nvidia.com/v1",
@@ -52,3 +54,14 @@ def get_client(provider: str) -> AsyncOpenAI:
         # SDK's internal retries were stacking silently on top of our timeout,
         # turning a 30s cap into 60s+ waits when a provider returned 503.
     )
+
+
+def check_provider_keys_present() -> list[str]:
+    """Return the list of providers referenced by config.py that are missing
+    their API key. Called once at startup so a misconfigured deployment fails
+    fast and loud instead of surfacing as a mysterious 502 on first request."""
+    missing = []
+    for provider, env_key in PROVIDER_ENV_KEYS.items():
+        if not os.getenv(env_key):
+            missing.append(f"{provider} ({env_key})")
+    return missing

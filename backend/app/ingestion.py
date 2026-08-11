@@ -11,6 +11,7 @@ import base64
 import fitz  # PyMuPDF
 
 from .clients import get_client
+from .config import VISION_MODEL
 
 MAX_VISION_PAGES = 5  # cap scanned-PDF pages sent to the vision model
 MIN_TEXT_LENGTH = 50  # below this, treat the PDF as scanned/image-only
@@ -40,7 +41,7 @@ async def describe_image(file_bytes: bytes, mime_type: str = "image/png") -> str
     client = get_client("groq")
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     resp = await client.chat.completions.create(
-        model="llama-3.2-90b-vision-preview",
+        model=VISION_MODEL,
         messages=[
             {
                 "role": "user",
