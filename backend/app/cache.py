@@ -1,21 +1,21 @@
-"""
-Small dependency-free TTL+LRU cache.
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-Two things get expensive to redo and are both safe to cache because they're
-pure functions of their input bytes/text:
-
-  1. OCR / vision transcription of an uploaded file (ingestion.py) — keyed by
-     a hash of the file's raw bytes, so the *same* PDF/image uploaded again
-     (even in a different conversation) skips the vision call entirely.
-  2. A full council deliberation — keyed by a hash of (prompt, context), so an
-     identical question (e.g. a user double-submitting, or a retry after a
-     network blip on the frontend) doesn't re-spend 6-10 LLM calls.
-
-This is intentionally in-process memory, not Redis/disk. It resets on
-restart and isn't shared across workers. That's a fine trade for a single-
-instance deployment; swap the internals for a Redis-backed store if this
-runs behind multiple workers.
-"""
 
 import time
 from collections import OrderedDict
@@ -50,6 +50,5 @@ class TTLCache:
         return len(self._store)
 
 
-# Shared instances imported by ingestion.py and council.py.
-ATTACHMENT_CACHE = TTLCache(maxsize=100, ttl_seconds=3600)   # extracted file text, 1h
-COUNCIL_RESULT_CACHE = TTLCache(maxsize=200, ttl_seconds=900)  # full deliberations, 15m
+ATTACHMENT_CACHE = TTLCache(maxsize=100, ttl_seconds=3600)                            
+COUNCIL_RESULT_CACHE = TTLCache(maxsize=200, ttl_seconds=900)

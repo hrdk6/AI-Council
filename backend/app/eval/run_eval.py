@@ -1,25 +1,25 @@
-"""
-Evaluation harness scaffold.
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-What this gives you today: a runnable script that fires every prompt in
-gold_dataset.json through the real council and records, per case, whether
-the Decision Architect selected the council you'd expect, how long it took,
-what the consensus scores came out to, and whether the challenge round ran
-or was skipped. That's an honest, working "does dynamic council selection +
-adaptive debate behave sensibly" check.
-
-What this does NOT give you: a verdict on whether the council's answers are
-BETTER than a single GPT-5/Claude/Gemini call. That needs (a) API access to
-those models, which isn't available in this environment, and (b) a judging
-methodology (a blind pairwise judge model, or human raters) — faking either
-would produce a number that looks like evidence but isn't. Wire in a
-baseline_models.py that calls whichever providers you have keys for, and a
-judge() function using an LLM-as-judge or human review, then extend
-run_one() below to also collect and compare those.
-
-Usage:
-    python -m app.eval.run_eval
-"""
 
 import asyncio
 import json

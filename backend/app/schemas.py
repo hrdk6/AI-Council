@@ -10,7 +10,7 @@ class MemberResponse(BaseModel):
     provider: str
     content: Optional[str] = None
     recommendation: Optional[str] = None
-    confidence: Optional[float] = None  # self-reported, 0-1
+    confidence: Optional[float] = None                      
     key_risk: Optional[str] = None
     success: bool
     error: Optional[str] = None

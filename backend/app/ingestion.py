@@ -1,25 +1,25 @@
-"""
-Handles PDF and image inputs.
+\
+\
+\
+\
+\
+\
+\
 
-- Text-based PDFs: extracted directly with PyMuPDF (fast, free, no API call).
-- Scanned/image-only PDFs: rendered page-by-page and described via a
-  dedicated Groq vision model, capped at MAX_VISION_PAGES.
-- Raw images: sent directly to the Groq vision model.
-"""
 
 import base64
-import fitz  # PyMuPDF
+import fitz           
 
 from .clients import get_client
 from .config import VISION_MODEL
 
-MAX_VISION_PAGES = 5  # cap scanned-PDF pages sent to the vision model
-MIN_TEXT_LENGTH = 50  # below this, treat the PDF as scanned/image-only
-MAX_EXTRACTED_CHARS = 28_000  # keep attachment context within a useful, bounded budget
+MAX_VISION_PAGES = 5                                                  
+MIN_TEXT_LENGTH = 50                                                   
+MAX_EXTRACTED_CHARS = 28_000                                                           
 
 
 def _cap_extracted_text(text: str) -> str:
-    """Avoid allowing a long attachment to crowd out the actual decision prompt."""
+
     if len(text) <= MAX_EXTRACTED_CHARS:
         return text
     return (
@@ -37,7 +37,7 @@ def extract_pdf_text(file_bytes: bytes) -> str:
 
 
 async def describe_image(file_bytes: bytes, mime_type: str = "image/png") -> str:
-    # Use a dedicated Groq vision model since the Chairman is now text-only
+
     client = get_client("groq")
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     resp = await client.chat.completions.create(
@@ -74,7 +74,7 @@ async def extract_pdf_or_image_text(filename: str, file_bytes: bytes) -> str:
         if len(text) >= MIN_TEXT_LENGTH:
             return _cap_extracted_text(text)
 
-        # Scanned PDF: render pages to images and describe via vision model
+
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         try:
             descriptions = []

@@ -1,13 +1,13 @@
-"""
-Lightweight, dependency-free observability.
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-This does NOT try to be Prometheus/Grafana/LangSmith. Wiring those in is a
-real infra decision (where do they run, who has access, what's retained) and
-shouldn't be faked with a stub integration. What's here instead is an
-honest, always-on in-process metrics recorder plus structured logging, so
-the /metrics endpoint has real numbers today, and swapping the internals for
-a real metrics backend later is a one-file change (this one).
-"""
 
 import logging
 import time
@@ -82,7 +82,7 @@ def new_request_id() -> str:
 
 
 class StageTimer:
-    """Tiny helper for logging how long a labelled stage took."""
+
 
     def __init__(self, request_id: str, label: str):
         self.request_id = request_id

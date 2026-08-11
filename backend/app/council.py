@@ -24,19 +24,17 @@ from .schemas import CouncilResult, MemberResponse
 
 logger = logging.getLogger("council")
 
-MAX_RETRIES = 2  # Increased slightly since we are respecting retry-after headers
+MAX_RETRIES = 2                                                                  
 REQUEST_TIMEOUT = 35
 
-# Drastically reduced token counts to fit within Groq rate limits
+
 MEMBER_MAX_TOKENS = 480
 CHARTER_MAX_TOKENS = 500
 CHAIR_MAX_TOKENS = 1400
 MAX_PROMPT_CHARS = 12_000
 MAX_CONTEXT_CHARS = 28_000
 
-# Consensus is "high enough to skip the challenge round" when members mostly
-# agree (tight confidence spread) AND are themselves confident. Either
-# condition failing means there's something worth debating.
+
 SKIP_DEBATE_AGREEMENT_THRESHOLD = 0.85
 SKIP_DEBATE_CONFIDENCE_THRESHOLD = 0.6
 
@@ -57,19 +55,19 @@ async def _emit(on_event: EventCallback, event: str, data: dict) -> None:
 
 
 def _strip_think_tags(text: Optional[str]) -> str:
-    """Never return model scratchpad text to other models or the API client.
-    Returns empty string if the entire response was scratchpad (e.g. truncated
-    inside a <think> block) — callers must handle the empty-string case rather
-    than falling back to the raw text, which would expose the thinking."""
+\
+\
+\
+
     if not text:
         return ""
-    # Remove closed <think>...</think> blocks first.
+
     cleaned = _THINK_TAG_RE.sub("", text).strip()
-    # Remove any remaining unclosed <think> block (model ran out of tokens
-    # while thinking and never wrote </think> or the real answer).
+
+
     cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL | re.IGNORECASE).strip()
-    # Do NOT fall back to raw text: if cleaned is empty the whole response was
-    # scratchpad and we must signal that to the caller, not leak the thinking.
+
+
     return cleaned
 
 
@@ -80,14 +78,14 @@ def _clip(text: str, limit: int, label: str) -> str:
 
 
 def _parse_structured_member_output(raw_text: str) -> dict:
-    """Members are asked to answer as strict JSON so the chair (and the UI)
-    gets a comparable recommendation/confidence/risk instead of free prose.
-    Models don't always comply perfectly, so this degrades gracefully: any
-    parse failure just falls back to treating the whole reply as the
-    rationale with no numeric confidence, rather than failing the member."""
+\
+\
+\
+\
+
     candidate = _JSON_FENCE_RE.sub("", raw_text.strip()).strip()
-    # Some models add a sentence before/after the JSON object; grab the
-    # outermost {...} block if the whole string isn't valid JSON on its own.
+
+
     if not candidate.startswith("{"):
         brace_match = re.search(r"\{.*\}", candidate, re.DOTALL)
         if brace_match:
@@ -131,8 +129,8 @@ async def _call_text(
         max_tokens: int,
         request_id: str = "-",
 ) -> tuple[str, int]:
-    """Call one model with bounded retries and explicit rate-limit parsing.
-    Returns (response_text, tokens_used)."""
+\
+
     last_error: Optional[Exception] = None
 
     for attempt in range(MAX_RETRIES + 1):
@@ -163,10 +161,10 @@ async def _call_text(
             latency = time.perf_counter() - started
             METRICS.record_llm_call(cfg.provider, 0, latency, success=False)
 
-            # Check if the provider gave us an exact wait time (common with Groq 429s)
+
             match = _RETRY_AFTER_RE.search(error_str)
             if match:
-                wait_time = float(match.group(1)) + 0.5  # add buffer
+                wait_time = float(match.group(1)) + 0.5              
             else:
                 wait_time = 1.25 * (attempt + 1)
 
@@ -183,7 +181,7 @@ async def _call_text(
 async def call_member(
         key: str, cfg: ModelConfig, user_prompt: str, round_num: int, request_id: str = "-"
 ) -> MemberResponse:
-    """A failed member stays visible in the audit trail but never aborts the council."""
+
     started = time.perf_counter()
     try:
         raw_text, tokens = await _call_text(
@@ -231,10 +229,10 @@ def _source_brief(prompt: str, context: Optional[str]) -> str:
 
 
 def _select_council(charter_text: str) -> list[str]:
-    """Parse the Decision Architect's 'Council: a, b, c' line into a
-    validated list of EXPERT_LIBRARY keys. Falls back to the safe default
-    four-member panel on any parsing or validation failure — a malformed
-    council selection should never be the reason a request fails."""
+\
+\
+\
+
     match = _COUNCIL_LINE_RE.search(charter_text)
     if not match:
         return list(DEFAULT_COUNCIL_KEYS)
@@ -245,7 +243,7 @@ def _select_council(charter_text: str) -> list[str]:
         if anchor not in selected:
             selected.append(anchor)
 
-    # De-dupe while preserving order.
+
     seen = set()
     ordered = [key for key in selected if not (key in seen or seen.add(key))]
 
@@ -259,8 +257,8 @@ def _select_council(charter_text: str) -> list[str]:
 
 
 async def _build_decision_charter(source_brief: str, request_id: str) -> tuple[str, list[str]]:
-    """Establish a common objective, criteria, AND council composition before
-    opinions are collected. Returns (charter_text, selected_expert_keys)."""
+\
+
     try:
         charter_text, _ = await _call_text(
             "decision charter",
@@ -305,17 +303,17 @@ def _format_positions(responses: list[MemberResponse]) -> str:
 def _latest_position_per_member(
         round1: list[MemberResponse], round2: list[MemberResponse]
 ) -> list[MemberResponse]:
-    """Keep diversity if a member's challenge round fails after a strong first response."""
+
     revised_by_key = {item.key: item for item in round2 if item.success and item.content}
     return [revised_by_key.get(item.key, item) for item in round1 if item.success and item.content]
 
 
 def _score_consensus(responses: list[MemberResponse]) -> tuple[Optional[float], Optional[float]]:
-    """Cheap, honest consensus signal computed from members' own self-reported
-    confidence — NOT semantic agreement between their recommendations (that
-    would need another LLM call to judge, which defeats the point of a
-    cheap adaptive-debate gate). confidence_score is the mean self-reported
-    confidence; agreement_score shrinks as those confidences spread apart."""
+\
+\
+\
+\
+
     confidences = [r.confidence for r in responses if r.success and r.confidence is not None]
     if len(confidences) < 2:
         return None, None
@@ -420,7 +418,7 @@ async def run_council(
 
         started = time.perf_counter()
 
-        # Run debate round one member at a time to stay within per-model TPM limits.
+
         for resp in successful_round1:
             chunk_results = await asyncio.gather(
                 call_member(resp.key, council[resp.key], debate_prompt(resp.key), round_num=2, request_id=request_id)
@@ -428,10 +426,10 @@ async def run_council(
             round2.extend(chunk_results)
             for member in chunk_results:
                 await _emit(on_event, "member_done", {"request_id": request_id, **member.model_dump()})
-            await asyncio.sleep(3.0)  # Allow TPM quota to recover between members
+            await asyncio.sleep(3.0)                                              
 
         logger.info("[%s] Challenge round completed in %.2fs", request_id, time.perf_counter() - started)
-        # Recompute consensus from the latest (post-debate) positions.
+
         confidence_score, agreement_score = _score_consensus(
             _latest_position_per_member(round1, round2)
         )
@@ -457,7 +455,7 @@ async def run_council(
         "Do not use false certainty, do not offer an unranked menu, do not use <think> tags, and do not invent evidence."
     )
 
-    # Brief pause so per-model TPM quota has recovered before the chairman call.
+
     await asyncio.sleep(4.0)
 
     try:
@@ -466,7 +464,7 @@ async def run_council(
         )
     except Exception as error:
         logger.exception("[%s] Chairman failed: %s", request_id, error)
-        # Replacing the ugly raw markdown dump with a polished failure state
+
         final_answer = (
             "Recommendation\nDeliberation delayed due to temporary high system demand.\n\n"
             "Execution plan\n1. Wait a moment for provider limits to reset.\n"

@@ -3,7 +3,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-load_dotenv()  # must run before any get_client() call reads env vars
+load_dotenv()                                                        
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,8 +21,7 @@ MAX_TOTAL_UPLOAD_BYTES = 30 * 1024 * 1024
 MAX_ATTACHMENTS = 5
 MAX_PROMPT_CHARS = 12_000
 
-# Wide-open CORS for local dev / Streamlit frontend calling across origins.
-# Tighten allow_origins to your deployed frontend URL before going public.
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,7 +39,7 @@ async def health():
 async def ask(
     prompt: str = Form(...),
     files: list[UploadFile] = File(default=[]),
-    # Keep the original field working for older clients during the transition.
+
     file: Optional[UploadFile] = File(None),
     debate: bool = Form(True),
 ):

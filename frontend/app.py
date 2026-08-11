@@ -14,7 +14,7 @@ st.set_page_config(
 
 
 def escape_text(value: Any) -> str:
-    """Safely prepare model and API output for a small HTML surface."""
+
     return html.escape(str(value)).replace("\n", "<br>")
 
 
@@ -87,7 +87,7 @@ _DIRECTIVE_HEADING_RE = re.compile(
 
 
 def parse_directive(value: Any) -> list[tuple[str, str]]:
-    """Turn the chairman's fixed-format decision memo into readable report sections."""
+
     sections: list[tuple[str, list[str]]] = []
     current_heading: str | None = None
     current_lines: list[str] = []
@@ -115,7 +115,7 @@ def parse_directive(value: Any) -> list[tuple[str, str]]:
 
 
 def decision_brief_text(result: dict[str, Any]) -> str:
-    """Create a portable plain-text record without exposing raw HTML."""
+
     return (
         f"AI COUNCIL | DECISION BRIEF\n{'=' * 32}"
         f"\n\nQUESTION\n{result.get('question', st.session_state.get('council_prompt', 'Not recorded'))}"
@@ -124,9 +124,6 @@ def decision_brief_text(result: dict[str, Any]) -> str:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Global CSS — Premium SaaS aesthetic (Linear / Vercel / Notion-inspired)
-# ─────────────────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
@@ -986,9 +983,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Sidebar
-# ─────────────────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.markdown("### // Config")
     backend_url = st.text_input(
@@ -1004,9 +999,6 @@ with st.sidebar:
         st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Navigation
-# ─────────────────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <nav class="site-nav">
@@ -1026,9 +1018,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Hero
-# ─────────────────────────────────────────────────────────────────────────────
+
 st.markdown(
     """
     <section class="hero">
@@ -1065,9 +1055,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Input card
-# ─────────────────────────────────────────────────────────────────────────────
+
 st.markdown(
     """
     <div class="input-card">
@@ -1098,9 +1086,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Primary action
-# ─────────────────────────────────────────────────────────────────────────────
+
 ask_clicked = st.button("Initiate deliberation", type="primary", use_container_width=True)
 
 if ask_clicked:
@@ -1123,7 +1109,7 @@ if ask_clicked:
                     timeout=(10, 240)
                 )
                 response.raise_for_status()
-                
+
                 payload = response.json()
                 status.update(label="Deliberation complete!", state="complete")
 
@@ -1150,9 +1136,7 @@ if ask_clicked:
 if st.session_state.get("council_error"):
     st.error(st.session_state.council_error)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Results
-# ─────────────────────────────────────────────────────────────────────────────
+
 result = st.session_state.get("council_result")
 
 if result:
@@ -1210,7 +1194,7 @@ if result:
             use_container_width=True,
         )
 
-    # Audit log
+
     with st.expander("View council deliberation record", expanded=False):
         st.markdown(
             '<p class="audit-intro">Each node produces an independent analysis (Phase I), then may revise its position after reviewing peer responses (Phase II). The full record is preserved below.</p>',
