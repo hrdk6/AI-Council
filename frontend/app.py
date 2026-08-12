@@ -28,40 +28,61 @@ def render_member_card(member: dict[str, Any], revised: dict[str, Any] | None, i
     model = safe_member_value(member, "model", "Model")
 
     if member.get("success"):
-        first_take = f'<div class="analysis-copy">{safe_member_value(member, "content", "No analysis returned.")}</div>'
+        content_html = safe_member_value(member, "content", "No analysis returned.")
+        rec = member.get("recommendation")
+        risk = member.get("key_risk")
+        conf = member.get("confidence")
+        
+        extras = ""
+        if rec or risk:
+            conf_str = f" (Confidence: {conf:.2f})" if conf is not None else ""
+            extras = f'<div class="analysis-meta"><strong>Recommendation:</strong> {escape_text(rec)}{conf_str}<br><strong>Key Risk:</strong> {escape_text(risk)}</div>'
+            
+        first_take = f'<div class="analysis-copy">{extras}{content_html}</div>'
     else:
         first_take = f'<div class="analysis-error">{safe_member_value(member, "error", "This member could not complete its analysis.")}</div>'
 
     revised_take = ""
     if revised:
         if revised.get("success"):
-            revised_content = f'<div class="analysis-copy">{safe_member_value(revised, "content", "No final position returned.")}</div>'
+            revised_content_html = safe_member_value(revised, "content", "No final position returned.")
+            r_rec = revised.get("recommendation")
+            r_risk = revised.get("key_risk")
+            r_conf = revised.get("confidence")
+            
+            r_extras = ""
+            if r_rec or r_risk:
+                r_conf_str = f" (Confidence: {r_conf:.2f})" if r_conf is not None else ""
+                r_extras = f'<div class="analysis-meta"><strong>Recommendation:</strong> {escape_text(r_rec)}{r_conf_str}<br><strong>Key Risk:</strong> {escape_text(r_risk)}</div>'
+                
+            revised_content = f'<div class="analysis-copy">{r_extras}{revised_content_html}</div>'
         else:
             revised_content = f'<div class="analysis-error">{safe_member_value(revised, "error", "This member could not revise its position.")}</div>'
+        
         revised_take = f"""
-            <div class="phase-divider"></div>
-            <div class="phase-badge phase-two">Phase II &nbsp;·&nbsp; Final Position</div>
-            {revised_content}
-        """
+<div class="phase-divider"></div>
+<div class="phase-badge phase-two">Phase II &nbsp;·&nbsp; Final Position</div>
+{revised_content}
+"""
 
     st.markdown(
         f"""
-        <article class="member-card" style="animation-delay: {min(index * 0.07, 0.42):.2f}s;">
-            <div class="member-head">
-                <div class="member-avatar">{index + 1:02d}</div>
-                <div class="member-meta">
-                    <h3 class="member-name">{role_name}</h3>
-                    <p class="member-model">{provider} &nbsp;/&nbsp; {model}</p>
-                </div>
-                <div class="member-status">
-                    <span class="status-dot"></span>
-                    Active
-                </div>
-            </div>
-            <div class="phase-badge">Phase I &nbsp;·&nbsp; Independent Analysis</div>
-            {first_take}
-            {revised_take}
-        </article>
+<article class="member-card" style="animation-delay: {min(index * 0.07, 0.42):.2f}s;">
+    <div class="member-head">
+        <div class="member-avatar">{index + 1:02d}</div>
+        <div class="member-meta">
+            <h3 class="member-name">{role_name}</h3>
+            <p class="member-model">{provider} &nbsp;/&nbsp; {model}</p>
+        </div>
+        <div class="member-status">
+            <span class="status-dot"></span>
+            Active
+        </div>
+    </div>
+    <div class="phase-badge">Phase I &nbsp;·&nbsp; Independent Analysis</div>
+    {first_take}
+    {revised_take}
+</article>
         """,
         unsafe_allow_html=True,
     )

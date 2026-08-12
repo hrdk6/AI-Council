@@ -28,7 +28,7 @@ MAX_RETRIES = 2
 REQUEST_TIMEOUT = 35
 
 
-MEMBER_MAX_TOKENS = 480
+MEMBER_MAX_TOKENS = 1200
 CHARTER_MAX_TOKENS = 500
 CHAIR_MAX_TOKENS = 1400
 MAX_PROMPT_CHARS = 12_000
@@ -92,9 +92,38 @@ def _parse_structured_member_output(raw_text: str) -> dict:
             candidate = brace_match.group(0)
 
     try:
-        parsed = json.loads(candidate)
+        parsed = json.loads(candidate, strict=False)
     except (json.JSONDecodeError, TypeError):
-        return {"recommendation": None, "confidence": None, "key_risk": None, "rationale": raw_text.strip()}
+        parsed = {}
+        
+    if not parsed:
+        rec_match = re.search(r'"recommendation"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', candidate, re.IGNORECASE | re.DOTALL)
+        if rec_match:
+            parsed["recommendation"] = rec_match.group(1).replace('\\"', '"').replace('\\n', '\n')
+            
+        conf_match = re.search(r'"confidence"\s*:\s*([0-9.]+)', candidate, re.IGNORECASE)
+        if conf_match:
+            try:
+                parsed["confidence"] = float(conf_match.group(1))
+            except ValueError:
+                pass
+                
+        risk_match = re.search(r'"key_risk"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', candidate, re.IGNORECASE | re.DOTALL)
+        if risk_match:
+            parsed["key_risk"] = risk_match.group(1).replace('\\"', '"').replace('\\n', '\n')
+            
+        rat_match = re.search(r'"rationale"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', candidate, re.IGNORECASE | re.DOTALL)
+        if rat_match:
+            parsed["rationale"] = rat_match.group(1).replace('\\"', '"').replace('\\n', '\n')
+        else:
+            rat_match_open = re.search(r'"rationale"\s*:\s*"(.*)', candidate, re.IGNORECASE | re.DOTALL)
+            if rat_match_open:
+                val = rat_match_open.group(1)
+                val = re.sub(r'"\s*\}?\s*$', '', val)
+                parsed["rationale"] = val.replace('\\"', '"').replace('\\n', '\n')
+
+    if not parsed:
+        parsed = {"rationale": raw_text.strip()}
 
     confidence = parsed.get("confidence")
     try:
