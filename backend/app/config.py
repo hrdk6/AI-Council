@@ -25,7 +25,7 @@ EXPERT_LIBRARY: dict[str, ModelConfig] = {
     ),
     "analyst": ModelConfig(
         provider="groq",
-        model="openai/gpt-oss-120b",
+        model="llama-3.3-70b-versatile",
         role_name="The Decision Analyst",
         system_prompt=(
             "You are the Decision Analyst on a decision council. Evaluate the available paths "
@@ -73,7 +73,7 @@ MAX_COUNCIL_SIZE = len(EXPERT_LIBRARY)
 
 DECISION_ARCHITECT = ModelConfig(
     provider="groq",
-    model="openai/gpt-oss-120b",
+    model="llama-3.3-70b-versatile",
     role_name="Decision Architect",
     system_prompt=(
         "You are a decision architect. Convert the user's request and attached material into a "
