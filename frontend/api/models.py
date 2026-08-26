@@ -1,6 +1,7 @@
 """Pydantic models for API requests and responses."""
 
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -17,6 +18,7 @@ class MemberAnalysis(BaseModel):
     key_risk: str | None = None
     confidence: float | None = None
     error: str | None = None
+    switched_from_model: str | None = None
 
 
 class CouncilRound(BaseModel):
@@ -42,6 +44,10 @@ class CouncilResponse(BaseModel):
     final_answer: str | None = None
     round1: list[dict[str, Any]] = Field(default_factory=list)
     round2: list[dict[str, Any]] = Field(default_factory=list)
+    request_id: str | None = None
+    agreement_score: float | None = None
+    confidence_score: float | None = None
+    sources: list[str] = Field(default_factory=list)
 
     @property
     def round_one(self) -> CouncilRound:
@@ -61,6 +67,7 @@ class AskRequest(BaseModel):
 
     prompt: str
     debate: bool = True
+    sources: list[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

@@ -2,18 +2,18 @@
 
 from frontend.api.client import CouncilApiClient
 from frontend.api.models import (
-    CouncilResponse,
-    MemberAnalysis,
-    AskRequest,
-    HealthResponse,
     ApiError,
+    AskRequest,
+    CouncilResponse,
+    HealthResponse,
+    MemberAnalysis,
 )
 
 __all__ = [
+    "ApiError",
+    "AskRequest",
     "CouncilApiClient",
     "CouncilResponse",
-    "MemberAnalysis",
-    "AskRequest",
     "HealthResponse",
-    "ApiError",
+    "MemberAnalysis",
 ]

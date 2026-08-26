@@ -1,14 +1,7 @@
-\
-\
-\
-\
-\
-
-
 import logging
 import os
+from functools import cache
 from pathlib import Path
-from functools import lru_cache
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -16,7 +9,10 @@ from openai import AsyncOpenAI
 logger = logging.getLogger("council")
 
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+# Prefer backend/.env and support a root-level .env for container deployments.
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(_BACKEND_DIR / ".env")
+load_dotenv(_BACKEND_DIR.parent / ".env")
 
 PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
@@ -33,7 +29,7 @@ PROVIDER_ENV_KEYS = {
 }
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_client(provider: str) -> AsyncOpenAI:
     if provider not in PROVIDER_BASE_URLS:
         raise ValueError(f"Unknown provider '{provider}'. Known: {list(PROVIDER_BASE_URLS)}")
@@ -49,16 +45,12 @@ def get_client(provider: str) -> AsyncOpenAI:
     return AsyncOpenAI(
         base_url=PROVIDER_BASE_URLS[provider],
         api_key=api_key,
-        max_retries=0,                                                      
-
-
+        max_retries=0,
+        timeout=60.0,  # Default timeout for all providers
     )
 
 
 def check_provider_keys_present() -> list[str]:
-\
-\
-
     missing = []
     for provider, env_key in PROVIDER_ENV_KEYS.items():
         if not os.getenv(env_key):

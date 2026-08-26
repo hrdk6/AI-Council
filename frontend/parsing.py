@@ -4,11 +4,11 @@ import re
 from typing import Any
 
 from frontend.constants import (
-    DIRECTIVE_HEADINGS,
     DIRECTIVE_HEADING_PATTERN,
-    FALLBACK_QUESTION,
+    DIRECTIVE_HEADINGS,
     FALLBACK_CHARTER,
     FALLBACK_FINAL_ANSWER,
+    FALLBACK_QUESTION,
 )
 
 _DIRECTIVE_HEADING_RE = re.compile(DIRECTIVE_HEADING_PATTERN, re.IGNORECASE)
@@ -55,4 +55,8 @@ def decision_brief_text(result: dict[str, Any], fallback_question: str | None = 
         f"\n\nQUESTION\n{question}"
         f"\n\nDECISION CHARTER\n{result.get('decision_charter', FALLBACK_CHARTER)}"
         f"\n\nFINAL DIRECTIVE\n{result.get('final_answer', FALLBACK_FINAL_ANSWER)}\n"
+        + (
+            "\nSOURCES\n" + "\n".join(result.get("sources", [])) + "\n"
+            if result.get("sources") else ""
+        )
     )

@@ -1,6 +1,11 @@
 """Tests for XSS sanitization utilities."""
 
-from frontend.utils import escape_text, escape_attr, sanitize_directive_content, safe_member_value
+from frontend.utils import (
+    escape_attr,
+    escape_text,
+    safe_member_value,
+    sanitize_directive_content,
+)
 
 
 class TestEscapeText:

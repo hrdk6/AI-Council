@@ -1,17 +1,17 @@
 """Utils package for AI Council frontend."""
 
 from frontend.utils.sanitize import (
-    escape_text,
     escape_attr,
-    sanitize_html,
-    sanitize_directive_content,
+    escape_text,
     safe_member_value,
+    sanitize_directive_content,
+    sanitize_html,
 )
 
 __all__ = [
-    "escape_text",
     "escape_attr",
-    "sanitize_html",
-    "sanitize_directive_content",
+    "escape_text",
     "safe_member_value",
+    "sanitize_directive_content",
+    "sanitize_html",
 ]

@@ -1,6 +1,6 @@
 """Tests for pure parsing/formatting logic."""
 
-from frontend.parsing import parse_directive, decision_brief_text
+from frontend.parsing import decision_brief_text, parse_directive
 
 
 class TestParseDirective:

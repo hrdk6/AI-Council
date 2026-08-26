@@ -1,6 +1,11 @@
 """Tests for Pydantic API models."""
 
-from frontend.api.models import CouncilResponse, MemberAnalysis, CouncilRound, AskRequest
+from frontend.api.models import (
+    AskRequest,
+    CouncilResponse,
+    CouncilRound,
+    MemberAnalysis,
+)
 
 
 class TestMemberAnalysis:
@@ -11,7 +16,7 @@ class TestMemberAnalysis:
         assert member.content is None
 
     def test_extra_fields_ignored(self):
-        member = MemberAnalysis(**{"key": "a", "success": False, "unknown_field": "ignored"})
+        member = MemberAnalysis(key="a", success=False, unknown_field="ignored")
         assert member.key == "a"
         assert member.success is False
 
@@ -22,7 +27,7 @@ class TestCouncilRound:
         assert len(round_) == 0
 
     def test_from_dicts(self):
-        round_ = CouncilRound(members=[MemberAnalysis(**{"key": "a"}), MemberAnalysis(**{"key": "b"})])
+        round_ = CouncilRound(members=[MemberAnalysis(key="a"), MemberAnalysis(key="b")])
         assert [m.key for m in round_] == ["a", "b"]
 
 
@@ -59,4 +64,4 @@ class TestCouncilResponse:
 class TestAskRequest:
     def test_serialization(self):
         request = AskRequest(prompt="Should we?", debate=True)
-        assert request.model_dump() == {"prompt": "Should we?", "debate": True}
+        assert request.model_dump() == {"prompt": "Should we?", "debate": True, "sources": []}

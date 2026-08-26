@@ -1,9 +1,7 @@
 """Tests for the CouncilApiClient using mocked HTTP responses."""
 
-from unittest import mock
 
 import pytest
-
 from frontend.api.client import CouncilApiClient
 from frontend.api.models import ApiError
 

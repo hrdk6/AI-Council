@@ -1,7 +1,8 @@
 """API client with retry logic and typed requests."""
 
 import logging
-import time
+import json
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urljoin
 
@@ -10,14 +11,18 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from frontend.api.models import (
+    ApiError,
     AskRequest,
     CouncilResponse,
     HealthResponse,
-    ApiError,
 )
 from frontend.constants import (
     API_ASK_ENDPOINT,
     API_HEALTH_ENDPOINT,
+    API_HISTORY_ENDPOINT,
+    API_METRICS_ENDPOINT,
+    API_PROVIDERS_ENDPOINT,
+    API_STREAM_ENDPOINT,
     DEFAULT_TIMEOUT_CONNECT,
     DEFAULT_TIMEOUT_READ,
 )
@@ -95,11 +100,58 @@ class CouncilApiClient:
         response = self._request("GET", API_HEALTH_ENDPOINT)
         return HealthResponse(**response.json())
 
-    def ask(self, prompt: str, debate: bool = True) -> CouncilResponse:
+    def ask(self, prompt: str, debate: bool = True, sources: str = "") -> CouncilResponse:
         """Submit a question to the council."""
-        request = AskRequest(prompt=prompt, debate=debate)
-        response = self._request("POST", API_ASK_ENDPOINT, data=request.model_dump())
+        # Backend uses Form(...) fields — must send multipart/form-data, not JSON.
+        form_data = {
+            "prompt": prompt,
+            "debate": str(debate).lower(),
+            "sources": sources,
+        }
+        response = self._request("POST", API_ASK_ENDPOINT, data=form_data)
         return CouncilResponse(**response.json())
+
+    def ask_stream(
+        self, prompt: str, debate: bool = True, sources: str = "", on_event: Callable[[str, dict], None] | None = None,
+    ) -> CouncilResponse:
+        """Submit a decision and surface server-sent progress events."""
+        url = urljoin(self.base_url + "/", API_STREAM_ENDPOINT.lstrip("/"))
+        try:
+            with self._session.post(
+                url, data={"prompt": prompt, "debate": str(debate).lower(), "sources": sources},
+                timeout=self.timeout, stream=True,
+            ) as response:
+                response.raise_for_status()
+                event_name = "message"
+                for raw_line in response.iter_lines(decode_unicode=True):
+                    line = raw_line or ""
+                    if line.startswith("event: "):
+                        event_name = line[7:]
+                    elif line.startswith("data: "):
+                        payload = json.loads(line[6:])
+                        if on_event:
+                            on_event(event_name, payload)
+                        if event_name == "complete":
+                            return CouncilResponse(**payload)
+                        if event_name == "error":
+                            raise ApiError(payload.get("detail", "Council request failed."))
+        except requests.exceptions.RequestException as error:
+            raise ApiError(f"Unable to stream council progress: {error}") from error
+        raise ApiError("Council stream ended before returning a result.")
+
+    def history(self) -> list[dict[str, Any]]:
+        return self._request("GET", API_HISTORY_ENDPOINT).json()
+
+    def providers(self) -> dict[str, Any]:
+        return self._request("GET", API_PROVIDERS_ENDPOINT).json()
+
+    def metrics(self) -> dict[str, Any]:
+        return self._request("GET", API_METRICS_ENDPOINT).json()
+
+    def save_feedback(self, decision_id: str, rating: int | None, outcome_note: str) -> None:
+        self._request("POST", f"{API_HISTORY_ENDPOINT}/{decision_id}/feedback", json={
+            "rating": rating, "outcome_note": outcome_note,
+        })
 
     def close(self) -> None:
         """Close the underlying session."""
@@ -108,5 +160,5 @@ class CouncilApiClient:
     def __enter__(self) -> "CouncilApiClient":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
