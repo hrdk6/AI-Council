@@ -1,7 +1,7 @@
-import logging
-import re
 import asyncio
 import json
+import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -9,8 +9,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -22,8 +21,7 @@ load_dotenv(BACKEND_DIR / ".env")
 load_dotenv(PROJECT_DIR / ".env")
 
 from .clients import check_provider_keys_present
-from .config import cfg
-from .config import CHAIRMAN, DECISION_ARCHITECT, EXPERT_LIBRARY
+from .config import CHAIRMAN, DECISION_ARCHITECT, EXPERT_LIBRARY, cfg
 from .council import run_council
 from .history import list_decisions, save_decision, save_feedback
 from .observability import METRICS, setup_logging
@@ -232,6 +230,13 @@ async def ask_stream(
         except Exception as error:
             logger.exception("Council stream failed")
             yield f"event: error\ndata: {json.dumps({'detail': str(error)})}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

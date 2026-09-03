@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 def test_client():
     """Create a test client with mocked run_council."""
     # Clear module cache to allow re-import with different mocks
-    modules_to_clear = [k for k in sys.modules.keys() if k.startswith('app.')]
+    modules_to_clear = [k for k in sys.modules if k.startswith('app.')]
     for mod in modules_to_clear:
         del sys.modules[mod]
     

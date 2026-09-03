@@ -1,9 +1,9 @@
 """API client with retry logic and typed requests."""
 
-import logging
 import json
+import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urljoin
 
 import requests
@@ -12,7 +12,6 @@ from urllib3.util.retry import Retry
 
 from frontend.api.models import (
     ApiError,
-    AskRequest,
     CouncilResponse,
     HealthResponse,
 )
@@ -157,7 +156,7 @@ class CouncilApiClient:
         """Close the underlying session."""
         self._session.close()
 
-    def __enter__(self) -> "CouncilApiClient":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:

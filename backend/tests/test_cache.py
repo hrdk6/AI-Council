@@ -52,13 +52,13 @@ def test_ttl_cache_thread_safety():
     def writer(i):
         try:
             asyncio.run(cache.set(f"key{i}", f"value{i}"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
     
     def reader(i):
         try:
             asyncio.run(cache.get(f"key{i}"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
     
     threads = []

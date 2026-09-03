@@ -6,7 +6,6 @@ import re
 import statistics
 import time
 from collections.abc import Awaitable, Callable
-from typing import Optional
 
 from .cache import COUNCIL_RESULT_CACHE
 from .clients import get_client
@@ -16,11 +15,11 @@ from .config import (
     DECISION_ARCHITECT,
     DEFAULT_COUNCIL_KEYS,
     EXPERT_LIBRARY,
+    GROQ_FALLBACK_CHAIN,
     MAX_COUNCIL_SIZE,
     MIN_COUNCIL_SIZE,
     SKIP_DEBATE_AGREEMENT_THRESHOLD,
     SKIP_DEBATE_CONFIDENCE_THRESHOLD,
-    GROQ_FALLBACK_CHAIN,
     ModelConfig,
     cfg,
 )
@@ -43,7 +42,7 @@ _RETRY_AFTER_RE = re.compile(r"try again in ([0-9.]+)s", re.IGNORECASE)
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 _COUNCIL_LINE_RE = re.compile(r"^Council:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
 
-EventCallback = Optional[Callable[[str, dict], Awaitable[None]]]
+EventCallback = Callable[[str, dict], Awaitable[None]] | None
 
 
 async def _emit(on_event: EventCallback, event: str, data: dict) -> None:
@@ -74,7 +73,7 @@ def _public_provider_error(error: Exception) -> str:
         return "Temporarily rate-limited. The council kept the successful responses and will retry on the next request."
     if "401" in text or "403" in text or "api key" in text:
         return "The configured provider credentials were not accepted. Check the backend API key configuration."
-    if "404" in text or "model" in text and "not found" in text:
+    if "404" in text or ("model" in text and "not found" in text):
         return "The selected provider model is unavailable. Update the backend model configuration and retry."
     if "timeout" in text or "connection" in text:
         return "The provider could not be reached in time. Please retry shortly."
@@ -158,7 +157,6 @@ async def _call_text(
 ) -> tuple[str, int, str]:
     """Call a text model with automatic fallback on errors for Groq provider."""
     last_error: Exception | None = None
-    original_model = model_cfg.model
     current_model = model_cfg.model
     
     # For Groq provider, prepare full fallback chain starting with current model
@@ -200,7 +198,7 @@ async def _call_text(
             logger.info("[%s][%s] %s/%s completed in %.2fs", request_id, label, model_cfg.provider, current_model, latency)
             METRICS.record_llm_call(model_cfg.provider, tokens, latency, success=True)
             return text, tokens, current_model
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             last_error = error
             error_str = str(error)
             latency = time.perf_counter() - started
@@ -275,7 +273,7 @@ async def call_member(
             tokens_used=tokens,
             switched_from_model=model_cfg.model if actual_model != model_cfg.model else None,
         )
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001
         return MemberResponse(
             key=key,
             role_name=model_cfg.role_name,
@@ -337,7 +335,7 @@ async def _build_decision_charter(source_brief: str, request_id: str) -> tuple[s
             request_id=request_id,
         )
         return charter_text, _select_council(charter_text)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001
         logger.warning("[%s] Decision charter unavailable; using a minimal charter: %s", request_id, error)
         fallback_charter = (
             "Decision: Respond to the user's request.\n"
@@ -406,7 +404,6 @@ def _score_consensus(responses: list[MemberResponse]) -> tuple[float | None, flo
 
 
 def _cache_key(prompt: str, context: str | None) -> str:
-    import json
     payload = json.dumps([prompt.strip(), (context or "").strip()], sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -528,7 +525,9 @@ async def run_council(
     failures = [response.role_name for response in round1 + round2 if not response.success]
     availability_note = ""
     if failures:
-        availability_note = f"\n\nAvailability note: {', '.join(sorted(set(failures)))} was unavailable in at least one round."
+        unique_failures = sorted(set(failures))
+        verb = "were" if len(unique_failures) > 1 else "was"
+        availability_note = f"\n\nAvailability note: {', '.join(unique_failures)} {verb} unavailable in at least one round."
 
     chair_prompt = (
         f"DECISION CHARTER:\n{decision_charter}\n\n"
@@ -551,8 +550,8 @@ async def run_council(
         final_answer, _, _ = await _call_text(
             "chairman", chairman_config, chair_prompt, max_tokens=chairman_config.max_tokens, request_id=request_id
         )
-    except Exception as error:
-        logger.exception("[%s] Chairman failed: %s", request_id, error)
+    except Exception:
+        logger.exception("[%s] Chairman failed", request_id)
 
         final_answer = (
             "Recommendation\nDeliberation delayed due to temporary high system demand.\n\n"

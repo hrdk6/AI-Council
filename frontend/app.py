@@ -52,14 +52,14 @@ def load_draft() -> str:
     if DRAFT_FILE.exists():
         try:
             return json.loads(DRAFT_FILE.read_text()).get("prompt", "")
-        except:
+        except Exception:  # noqa: BLE001, S110
             pass
     return ""
 
 def save_draft(prompt_text: str) -> None:
     try:
         DRAFT_FILE.write_text(json.dumps({"prompt": prompt_text}))
-    except:
+    except Exception:  # noqa: BLE001, S110
         pass
 
 if "prompt_input" not in st.session_state:
@@ -320,6 +320,7 @@ if SESSION_BACKEND_URL not in st.session_state:
 
 backend_url = st.session_state[SESSION_BACKEND_URL]
 
+provider_data = None  # Populated by sidebar health check; may be None if backend unreachable
 with st.sidebar:
     st.header("Settings")
     theme_mode = st.toggle("Light mode", key="theme_toggle")
@@ -520,8 +521,8 @@ else:
     color = "#ef4444" # red
 
 try:
-    num_nodes = len(provider_data.get("roles", [])) if "provider_data" in locals() else 3
-except:
+    num_nodes = len(provider_data.get("roles", [])) if provider_data is not None else 3
+except Exception:  # noqa: BLE001
     num_nodes = 3
 
 st.markdown(f"""
@@ -619,7 +620,7 @@ if ask_clicked:
                 st.session_state[SESSION_COUNCIL_ERROR] = str(e)
             except ValueError as e:
                 st.session_state[SESSION_COUNCIL_ERROR] = f"Invalid response: {e}"
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 st.session_state[SESSION_COUNCIL_ERROR] = f"Unexpected error: {e}"
 
 if st.session_state.get(SESSION_COUNCIL_ERROR):

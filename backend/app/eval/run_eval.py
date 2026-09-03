@@ -60,7 +60,7 @@ async def run_one(case: dict) -> dict:
             "missing_required_headings": missing_headings,
             "directive_complete": not missing_headings,
         }
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001
         return {
             "id": case["id"],
             "category": case.get("category"),

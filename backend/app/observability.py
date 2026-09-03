@@ -1,13 +1,4 @@
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
+"""Observability: structured logging, metrics, and request tracing."""
 
 import json
 import logging
@@ -15,6 +6,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Self
 
 
 class JsonFormatter(logging.Formatter):
@@ -73,9 +65,9 @@ class Metrics:
     total_llm_calls: int = 0
     total_llm_failures: int = 0
     total_latency_s: float = 0.0
-    provider_calls: dict = field(default_factory=dict)
-    provider_failures: dict = field(default_factory=dict)
-    provider_tokens: dict = field(default_factory=dict)
+    provider_calls: dict[str, int] = field(default_factory=dict)
+    provider_failures: dict[str, int] = field(default_factory=dict)
+    provider_tokens: dict[str, int] = field(default_factory=dict)
 
     def record_llm_call(self, provider: str, tokens: int, latency_s: float, success: bool) -> None:
         self.total_llm_calls += 1
@@ -128,18 +120,19 @@ def new_request_id() -> str:
 
 
 class StageTimer:
+    """Context manager that logs elapsed time for a named pipeline stage."""
 
     def __init__(self, request_id: str, label: str):
         self.request_id = request_id
         self.label = label
-        self._start: float | None = None
+        self._start: float = 0.0
 
-    def __enter__(self) -> "StageTimer":
+    def __enter__(self) -> Self:
         self._start = time.perf_counter()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        elapsed = time.perf_counter() - (self._start or time.perf_counter())
+        elapsed = time.perf_counter() - self._start
         extra = {"request_id": self.request_id}
         if exc:
             logger.warning("%s failed after %.2fs: %s", self.label, elapsed, exc, extra=extra)

@@ -88,7 +88,7 @@ class AppConfig(BaseModel):
     architect_timeout: int = Field(default=35, ge=1, le=300)
 
     chairman_provider: str = "groq"
-    chairman_model: str = "openai/gpt-oss-20b"
+    chairman_model: str = "openai/gpt-oss-120b"
     chairman_max_tokens: int = Field(default=700, ge=1, le=8192)
     chairman_timeout: int = Field(default=35, ge=1, le=300)
 

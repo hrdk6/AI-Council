@@ -19,20 +19,22 @@ def parse_directive(value: Any) -> list[tuple[str, str]]:
     sections: list[tuple[str, list[str]]] = []
     current_heading: str | None = None
     current_lines: list[str] = []
+    preamble_lines: list[str] = []  # Lines before the first recognized heading
 
     for line in str(value or "").splitlines():
         match = _DIRECTIVE_HEADING_RE.match(line.strip())
         if match:
             if current_heading is not None:
                 sections.append((current_heading, current_lines))
+            else:
+                # Save any preamble that appeared before the first heading
+                preamble_lines = current_lines
             current_heading = next(
                 heading
                 for heading in DIRECTIVE_HEADINGS
                 if heading.lower() == match.group(1).lower()
             )
             current_lines = []
-        elif current_heading is not None:
-            current_lines.append(line)
         else:
             current_lines.append(line)
 
@@ -41,6 +43,14 @@ def parse_directive(value: Any) -> list[tuple[str, str]]:
 
     if not sections:
         return [("Recommendation", str(value or FALLBACK_FINAL_ANSWER))]
+
+    # Prepend any pre-heading preamble to the first section's content
+    if preamble_lines:
+        preamble_text = "\n".join(preamble_lines).strip()
+        if preamble_text:
+            first_heading, first_lines = sections[0]
+            sections[0] = (first_heading, preamble_lines + [""] + first_lines)
+
     return [
         (heading, "\n".join(lines).strip() or "No details returned.")
         for heading, lines in sections

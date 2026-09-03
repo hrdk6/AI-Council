@@ -98,7 +98,7 @@ def validate_backend_url(url: str) -> tuple[bool, str]:
             if _PRIVATE_IP_REGEX.search(url):
                 return False, "Private/local IP addresses are not allowed."
             return False, f"Backend domain not allowed. Allowed: {', '.join(ALLOWED_BACKEND_DOMAINS)}"
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False, "Invalid URL format."
 
     return True, ""

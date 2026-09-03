@@ -18,9 +18,8 @@ def test_get_client_unknown_provider():
 
 
 def test_get_client_missing_key():
-    with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(RuntimeError, match="Missing API key"):
-            get_client("groq")
+    with patch.dict(os.environ, {}, clear=True), pytest.raises(RuntimeError, match="Missing API key"):
+        get_client("groq")
 
 
 def test_get_client_returns_async_openai():
