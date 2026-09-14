@@ -47,7 +47,6 @@ pip install -r requirements.txt
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
-pip install -r frontend\requirements.txt
 ```
 
 **Option 3: Install problematic package separately**
@@ -97,7 +96,7 @@ taskkill /F /PID <PID>
 # Backend on different port
 uvicorn app.main:app --reload --port 8001
 
-# Update frontend to use new backend URL in sidebar
+# Then open http://localhost:8001 (the web interface is served from the same port)
 ```
 
 ### Missing .env File
@@ -118,28 +117,72 @@ Copy-Item .env.example .env
 
 **Get a free Groq API key:** https://console.groq.com/keys
 
-### Frontend Connection Error
+### "Can't reach the council server"
+
+**Symptom:** The page loads but shows this message, or the page doesn't load at all.
+
+**Solution:**
+1. **Check the server is running**: visit http://localhost:8000/v1/health
+2. **Start it**: `.\start_all.ps1`
+3. **Check the firewall**: allow localhost connections
+4. **Web interface missing?** If `/v1/health` works but `/` returns 404, the server log says
+   "Web interface not found". Run from the repository so `frontend/public` exists, or set `FRONTEND_DIR`.
+
+### Backend Refuses to Start in Production
 
 **Symptom:**
 ```
-Connection refused at http://localhost:8000
+pydantic_core._pydantic_core.ValidationError: ... API_KEY must be set when ENVIRONMENT=production.
 ```
 
-**Solution:**
-1. **Check if backend is running**: Visit http://localhost:8000/v1/health
-2. **Start backend first**: `.\start_backend.ps1`
-3. **Check firewall**: Ensure localhost connections are allowed
-4. **Verify port**: Backend should be on port 8000
+**Solution:** Set `API_KEY` to a long random string, or use `ENVIRONMENT=development` locally.
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+Other settings are validated the same way. The error names the offending variable (for example
+`rate_limit_requests` means `RATE_LIMIT_REQUESTS`).
 
 ---
 
 ## Runtime Errors
 
-### "All models failed" Error
+### "The access key wasn't accepted"
+
+**Cause:** The server has `API_KEY` set, and the key entered in the browser doesn't match it.
+
+**Solution:** Click **Access key** at the top of the page and enter the exact `API_KEY` value. If you ticked
+"Remember on this device" with an old key, entering the new one replaces it.
+
+### Uploaded evidence shows "couldn't be read"
+
+The reason is shown under the file name:
+
+| Message | What to do |
+|---------|------------|
+| Password-protected | Remove the password (for example, print to PDF) and upload again. |
+| Damaged | Re-export the PDF or image; the file isn't valid. |
+| No selectable text, and reading scanned pages is turned off | Set `MAX_OCR_PAGES` above 0. |
+| The vision model couldn't read this file | Check that `VISION_MODELS` lists models your Groq key can use, then retry. |
+
+To see which vision models your key can reach:
+```powershell
+cd backend
+python -c "import asyncio,os;from dotenv import load_dotenv;load_dotenv('.env');from openai import AsyncOpenAI;c=AsyncOpenAI(base_url='https://api.groq.com/openai/v1',api_key=os.environ['GROQ_API_KEY']);print([m.id for m in asyncio.run(c.models.list()).data])"
+```
+
+### Statements look cut off, or members "couldn't take part" with empty responses
+
+**Cause:** `gpt-oss` models reason before answering, and those reasoning tokens count against
+`*_MAX_TOKENS`. At higher reasoning effort they can use the whole budget and return nothing.
+
+**Solution:** Keep `REASONING_EFFORT=low` (the default), or raise `EXPERT_*_MAX_TOKENS` and `CHAIRMAN_MAX_TOKENS`.
+Higher budgets use more of the free tier's tokens-per-minute allowance.
+
+### "No council member could respond" (503)
 
 **Symptom:**
 ```
-Error 502: operator failed after 3 attempts with all available models
+No council member could respond. The model providers may be rate-limited or misconfigured; please retry shortly.
 ```
 
 **Causes & Solutions:**
@@ -151,7 +194,7 @@ cat .env
 # Verify GROQ_API_KEY is correct
 ```
 
-**2. Rate Limits Exceeded (All 5 Models)**
+**2. Rate Limits Exceeded (All Fallback Models)**
 - **Wait 1 minute** - Free tier limits reset quickly
 - **Try again** - Limits are per-minute
 - **Consider Groq Pro** - Higher limits for production
@@ -161,38 +204,30 @@ cat .env
 - Wait for service restoration
 - Use alternative provider (if configured)
 
-### Rate Limit Error (Should Not Happen)
+### "Rate limit reached" (429)
 
-**Symptom:**
-```
-Error 429: Rate limit exceeded
-```
+**Cause:** This is the backend's own per-IP limit (`RATE_LIMIT_REQUESTS` per `RATE_LIMIT_WINDOW`
+seconds), not Groq's. Users behind the same proxy or office network share one IP address.
 
-**This shouldn't happen** with auto-switching enabled!
+**Solution:** Wait for the window to reset, or raise `RATE_LIMIT_REQUESTS` for multi-user deployments.
 
-**If you see this:**
-1. Check `GROQ_FALLBACK_CHAIN` in `backend/app/config.py` has all 5 models
-2. Verify auto-switching is enabled (not disabled in code)
-3. Check backend logs for "auto-switching" messages
-
-**Debug:**
+Provider-side 429s are retried and walk the Groq fallback chain automatically. To check the chain:
 ```powershell
-# Check config
 cd backend
 python -c "from app.config import GROQ_FALLBACK_CHAIN; print(GROQ_FALLBACK_CHAIN)"
-
-# Should output 5 models:
-# ('openai/gpt-oss-20b', 'openai/gpt-oss-120b', ...)
+# ('openai/gpt-oss-20b', 'openai/gpt-oss-120b') unless GROQ_FALLBACK_CHAIN overrides it
 ```
 
 ### Prompt Injection Detected
 
 **Symptom:**
 ```
-Error 400: Invalid prompt: potential injection attempt detected
+Invalid prompt: potential injection attempt detected.
 ```
 
-**Cause:** Your prompt contains suspicious patterns
+**Cause:** Your prompt contains patterns used to hijack model instructions (for example
+"ignore previous instructions" or "reveal your system prompt"). Ordinary questions that mention
+system prompts are allowed.
 
 **Solution:**
 - Remove phrases like "ignore previous instructions"
@@ -236,7 +271,6 @@ Error 400: Invalid prompt: potential injection attempt detected
 **2. Reduce Cache Size** (in .env)
 ```bash
 COUNCIL_CACHE_MAXSIZE=50  # Default: 200
-ATTACHMENT_CACHE_MAXSIZE=25  # Default: 100
 ```
 
 **3. Limit Concurrent Debate**
@@ -254,7 +288,7 @@ DEBATE_CONCURRENCY_LIMIT=1  # Default: 2
 
 **Check:**
 1. **Backend Response**: `switched_from_model` field should be present
-2. **Frontend Version**: Make sure you have latest code
+2. **Browser cache**: hard refresh so the latest interface scripts load
 3. **Browser Cache**: Hard refresh (Ctrl+Shift+R)
 
 ### Models Not Switching
@@ -267,13 +301,14 @@ DEBATE_CONCURRENCY_LIMIT=1  # Default: 2
 ```powershell
 cd backend
 python -c "from app.config import GROQ_FALLBACK_CHAIN; print('Models:', len(GROQ_FALLBACK_CHAIN))"
-# Should print: Models: 5
+# Default: Models: 2
 ```
 
 **2. Check error detection:**
 ```powershell
 # Look at backend logs
-# Should see: "auto-switching to..." messages
+# Transient errors log "auto-switching to ...".
+# "non-retriable error" means an auth or request problem (e.g. 401/400) that switching cannot fix.
 ```
 
 **3. Verify Groq provider:**
@@ -356,7 +391,7 @@ ruff: error: Command not found
 ```powershell
 pip install ruff
 ruff check backend/app
-ruff check frontend
+(cd frontend && npm test)
 ```
 
 ---
@@ -405,8 +440,8 @@ bash: ./start_all.sh: Permission denied
 
 **Solution:**
 ```bash
-chmod +x start_all.sh start_backend.sh start_frontend.sh
-./start_all.sh
+cd backend
+uvicorn app.main:app --port 8000
 ```
 
 **Port Already in Use**
@@ -433,22 +468,22 @@ kill -9 <PID>
 
 **Symptom:**
 ```
-ERROR: failed to solve with frontend dockerfile
+ERROR: failed to solve: process "/bin/sh -c pip install -r requirements.txt" did not complete
 ```
 
 **Solutions:**
 
 **1. Clear Docker cache:**
 ```bash
-docker-compose down
+docker compose down
 docker system prune -a
-docker-compose up --build
+docker compose up --build
 ```
 
 **2. Check Docker version:**
 ```bash
 docker --version  # Should be 20.10+
-docker-compose --version  # Should be 2.0+
+docker compose version  # Compose v2.24+ (for optional env_file)
 ```
 
 ### Container Won't Start
@@ -461,10 +496,10 @@ backend exited with code 1
 **Debug:**
 ```bash
 # View logs
-docker-compose logs backend
+docker compose logs backend
 
 # Run interactively
-docker-compose run backend bash
+docker compose exec backend sh
 ```
 
 ### Environment Variables Not Loaded
@@ -481,7 +516,7 @@ ls -la .env
 
 # Docker Compose automatically loads .env
 # Or specify explicitly:
-docker-compose --env-file .env up
+docker compose --env-file .env up
 ```
 
 ---
@@ -512,7 +547,7 @@ Invoke-WebRequest http://localhost:8000/v1/health | ConvertFrom-Json
 # Should return:
 # {
 #   "status": "ok",
-#   "version": "1.0.0",
+#   "version": "2.1.0",
 #   "providers_missing": []
 # }
 ```
@@ -540,11 +575,11 @@ python test_council.py
 ### Monitor Network Requests
 
 **Browser DevTools:**
-1. Open frontend (http://localhost:8501)
+1. Open http://localhost:8000
 2. Press F12 (DevTools)
-3. Go to Network tab
-4. Submit a question
-5. Check requests to `/v1/ask`
+3. Go to the Network tab
+4. Convene the council
+5. Select the `/v1/ask/stream` request and open **EventStream** to watch each event arrive
 
 ---
 
@@ -556,8 +591,8 @@ python test_council.py
 
 ### Review Logs
 - **Backend**: PowerShell window running backend
-- **Frontend**: PowerShell window running frontend
-- **Docker**: `docker-compose logs -f`
+- **Browser**: DevTools console (F12) on http://localhost:8000
+- **Docker**: `docker compose logs -f`
 
 ### Check External Services
 - **Groq Status**: https://status.groq.com
@@ -582,8 +617,8 @@ When reporting issues, include:
 | `ModuleNotFoundError` | Python can't find module | Install dependencies, check directory |
 | `Connection refused` | Backend not running | Start backend first |
 | `429 Rate limit` | Too many requests | Wait 1 minute or shouldn't happen with auto-switch |
-| `401 Unauthorized` | Invalid API key | Check GROQ_API_KEY in .env |
-| `413 Payload too large` | File too big | Reduce file size (<12MB) |
+| `401 Unauthorized` | Wrong or missing access key | Enter the API_KEY value under "Access key" |
+| `503 Service unavailable` (from /v1/ask) | No council member responded | Check provider keys and status.groq.com |
 | `502 Bad Gateway` | Backend error | Check backend logs |
 | `503 Service unavailable` | Groq service down | Check status.groq.com |
 
@@ -597,11 +632,11 @@ If problems persist:
 2. **Reinstall dependencies**: Delete `venv`, reinstall
 3. **Check file permissions**: Ensure you can read/write
 4. **Review code**: Check for any local modifications
-5. **Test individually**: Test backend, then frontend separately
+5. **Test individually**: check /v1/health first, then the web interface
 
 **Remember:** The system is designed to be resilient. Most issues are configuration or environment-related, not code bugs.
 
 ---
 
-**Last Updated:** 2026-08-25  
+**Last Updated:** 2026-09-14  
 **Applies to:** AI Council v2.1 with Auto-Switching

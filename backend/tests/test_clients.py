@@ -41,6 +41,12 @@ def test_check_provider_keys_present_all_missing():
         assert "openrouter (OPENROUTER_API_KEY)" in missing
 
 
+def test_check_provider_keys_present_filters_to_selected_providers():
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test"}, clear=True):
+        assert check_provider_keys_present(["groq"]) == []
+        assert check_provider_keys_present(["groq", "gemini"]) == ["gemini (GEMINI_API_KEY)"]
+
+
 def test_check_provider_keys_present_some_present():
     with patch.dict(os.environ, {"GROQ_API_KEY": "test", "GEMINI_API_KEY": "test"}, clear=True):
         missing = check_provider_keys_present()

@@ -1,13 +1,24 @@
-"""Configuration for the AI Council backend."""
+"""Configuration for the AI Council backend.
+
+Every ``AppConfig`` field can be overridden by an environment variable with the
+upper-cased field name (``expert_operator_model`` -> ``EXPERT_OPERATOR_MODEL``).
+Empty variables are ignored so blank lines in ``.env`` fall back to defaults.
+"""
 
 import os
 from functools import lru_cache
+from pathlib import Path
+from typing import Any, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 VALID_PROVIDERS = {"groq", "nvidia_nim", "gemini", "openrouter"}
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 VALID_ENVIRONMENTS = {"development", "staging", "production", "test"}
+EXPERT_KEYS = ("operator", "analyst", "risk", "researcher")
+
+DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[1] / "data" / "ai_council.db"
+DEFAULT_FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public"
 
 
 class ModelConfig(BaseModel):
@@ -22,44 +33,19 @@ class ModelConfig(BaseModel):
     @classmethod
     def validate_provider(cls, v: str) -> str:
         if v not in VALID_PROVIDERS:
-            raise ValueError(f"Invalid provider '{v}'. Must be one of: {', '.join(VALID_PROVIDERS)}")
+            raise ValueError(f"Invalid provider '{v}'. Must be one of: {', '.join(sorted(VALID_PROVIDERS))}")
         return v
 
 
 class AppConfig(BaseModel):
-    api_key: str = Field(default="", description="API key for authentication")
-    allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8501"])
+    api_key: str = Field(default="", description="API key clients must send in the X-API-Key header")
+    allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8000"])
     rate_limit_requests: int = Field(default=10, description="Requests per rate-limit window", ge=1, le=1000)
     rate_limit_window: int = Field(default=60, description="Rate limit window in seconds", ge=1, le=3600)
     log_level: str = Field(default="INFO")
     environment: str = Field(default="development")
-
-    @field_validator("log_level")
-    @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        v_upper = v.upper()
-        if v_upper not in VALID_LOG_LEVELS:
-            raise ValueError(f"Invalid log_level '{v}'. Must be one of: {', '.join(VALID_LOG_LEVELS)}")
-        return v_upper
-
-    @field_validator("environment")
-    @classmethod
-    def validate_environment(cls, v: str) -> str:
-        v_lower = v.lower()
-        if v_lower not in VALID_ENVIRONMENTS:
-            raise ValueError(f"Invalid environment '{v}'. Must be one of: {', '.join(VALID_ENVIRONMENTS)}")
-        return v_lower
-
-    @field_validator(
-        "expert_operator_provider", "expert_analyst_provider", "expert_risk_provider",
-        "expert_researcher_provider", "architect_provider", "chairman_provider",
-        mode="before"
-    )
-    @classmethod
-    def validate_providers(cls, v: str) -> str:
-        if v not in VALID_PROVIDERS:
-            raise ValueError(f"Invalid provider '{v}'. Must be one of: {', '.join(VALID_PROVIDERS)}")
-        return v
+    database_path: str = Field(default=str(DEFAULT_DATABASE_PATH))
+    stream_heartbeat_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
 
     # Model configs
     expert_operator_provider: str = "groq"
@@ -89,14 +75,35 @@ class AppConfig(BaseModel):
 
     chairman_provider: str = "groq"
     chairman_model: str = "openai/gpt-oss-120b"
-    chairman_max_tokens: int = Field(default=700, ge=1, le=8192)
+    chairman_max_tokens: int = Field(default=1200, ge=1, le=8192)
     chairman_timeout: int = Field(default=35, ge=1, le=300)
+
+    # Ordered Groq fallback chain used when a Groq model is rate-limited or unavailable
+    groq_fallback_chain: tuple[str, ...] = ("openai/gpt-oss-20b", "openai/gpt-oss-120b")
+
+    # gpt-oss models reason before answering and those tokens count against max_tokens. At the default
+    # effort they can spend the whole budget reasoning and return nothing; "low" keeps answers complete.
+    reasoning_effort: str = Field(default="low")
+
+    # Evidence uploads: images and scanned PDF pages are read by a vision-capable model
+    vision_provider: str = "groq"
+    vision_models: tuple[str, ...] = ("qwen/qwen3.8-27b", "qwen/qwen3.6-27b")
+    vision_max_tokens: int = Field(default=1500, ge=100, le=8192)
+    vision_timeout: int = Field(default=60, ge=5, le=300)
+    max_upload_files: int = Field(default=5, ge=0, le=10)
+    max_pdf_mb: float = Field(default=15.0, gt=0, le=50)
+    max_image_mb: float = Field(default=8.0, gt=0, le=20)
+    max_pdf_pages: int = Field(default=40, ge=1, le=300)
+    max_ocr_pages: int = Field(default=3, ge=0, le=10)
+
+    # Web interface (served at "/" when the directory exists)
+    frontend_dir: str = Field(default=str(DEFAULT_FRONTEND_DIR))
 
     # Council settings
     min_council_size: int = Field(default=2, ge=1, le=10)
     max_council_size: int = Field(default=3, ge=1, le=10)
     anchor_experts: tuple[str, ...] = ("risk",)
-    default_council_keys: tuple[str, ...] = ("operator", "analyst", "risk", "researcher")
+    default_council_keys: tuple[str, ...] = EXPERT_KEYS
 
     # Debate settings
     skip_debate_agreement_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
@@ -106,65 +113,93 @@ class AppConfig(BaseModel):
     # Cache settings
     council_cache_ttl: int = Field(default=900, ge=60, le=86400)
     council_cache_maxsize: int = Field(default=200, ge=1, le=10000)
+
     # Limits
     max_prompt_chars: int = Field(default=12000, ge=100, le=100000)
     max_context_chars: int = Field(default=28000, ge=100, le=200000)
 
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        v_upper = v.upper()
+        if v_upper not in VALID_LOG_LEVELS:
+            raise ValueError(f"Invalid log_level '{v}'. Must be one of: {', '.join(sorted(VALID_LOG_LEVELS))}")
+        return v_upper
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort(cls, v: str) -> str:
+        v_lower = v.lower().strip()
+        if v_lower not in {"", "low", "medium", "high"}:
+            raise ValueError("REASONING_EFFORT must be low, medium, high, or empty to use the provider default.")
+        return v_lower
+
+    @field_validator("environment")
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        v_lower = v.lower()
+        if v_lower not in VALID_ENVIRONMENTS:
+            raise ValueError(f"Invalid environment '{v}'. Must be one of: {', '.join(sorted(VALID_ENVIRONMENTS))}")
+        return v_lower
+
+    @field_validator(
+        "expert_operator_provider", "expert_analyst_provider", "expert_risk_provider",
+        "expert_researcher_provider", "architect_provider", "chairman_provider", "vision_provider",
+        mode="before",
+    )
+    @classmethod
+    def validate_providers(cls, v: str) -> str:
+        if v not in VALID_PROVIDERS:
+            raise ValueError(f"Invalid provider '{v}'. Must be one of: {', '.join(sorted(VALID_PROVIDERS))}")
+        return v
+
+    @field_validator(
+        "allowed_origins", "groq_fallback_chain", "vision_models", "anchor_experts", "default_council_keys",
+        mode="before",
+    )
+    @classmethod
+    def split_comma_separated(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
+    @field_validator("anchor_experts", "default_council_keys")
+    @classmethod
+    def validate_expert_keys(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        unknown = [key for key in v if key not in EXPERT_KEYS]
+        if unknown:
+            raise ValueError(f"Unknown expert keys {unknown}. Must be from: {', '.join(EXPERT_KEYS)}")
+        return v
+
+    @model_validator(mode="after")
+    def validate_consistency(self) -> Self:
+        if self.min_council_size > self.max_council_size:
+            raise ValueError("MIN_COUNCIL_SIZE cannot be greater than MAX_COUNCIL_SIZE.")
+        if not self.default_council_keys:
+            raise ValueError("DEFAULT_COUNCIL_KEYS must list at least one expert.")
+        if self.is_production and not self.api_key:
+            raise ValueError("API_KEY must be set when ENVIRONMENT=production.")
+        if self.is_production and "*" in self.allowed_origins:
+            raise ValueError("ALLOWED_ORIGINS cannot contain '*' when ENVIRONMENT=production.")
+        return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+
+def _env_overrides() -> dict[str, str]:
+    overrides = {}
+    for name in AppConfig.model_fields:
+        value = os.environ.get(name.upper(), "").strip()
+        if value:
+            overrides[name] = value
+    return overrides
+
 
 @lru_cache(maxsize=1)
 def get_config() -> AppConfig:
-    return AppConfig(
-        api_key=os.getenv("API_KEY", ""),
-        allowed_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(","),
-        rate_limit_requests=int(os.getenv("RATE_LIMIT_REQUESTS", "10")),
-        rate_limit_window=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
-        environment=os.getenv("ENVIRONMENT", "development"),
-
-        expert_operator_provider=os.getenv("EXPERT_OPERATOR_PROVIDER", "groq"),
-        expert_operator_model=os.getenv("EXPERT_OPERATOR_MODEL", "openai/gpt-oss-20b"),
-        expert_operator_max_tokens=int(os.getenv("EXPERT_OPERATOR_MAX_TOKENS", "500")),
-        expert_operator_timeout=int(os.getenv("EXPERT_OPERATOR_TIMEOUT", "35")),
-
-        expert_analyst_provider=os.getenv("EXPERT_ANALYST_PROVIDER", "groq"),
-        expert_analyst_model=os.getenv("EXPERT_ANALYST_MODEL", "openai/gpt-oss-20b"),
-        expert_analyst_max_tokens=int(os.getenv("EXPERT_ANALYST_MAX_TOKENS", "500")),
-        expert_analyst_timeout=int(os.getenv("EXPERT_ANALYST_TIMEOUT", "35")),
-
-        expert_risk_provider=os.getenv("EXPERT_RISK_PROVIDER", "groq"),
-        expert_risk_model=os.getenv("EXPERT_RISK_MODEL", "openai/gpt-oss-20b"),
-        expert_risk_max_tokens=int(os.getenv("EXPERT_RISK_MAX_TOKENS", "500")),
-        expert_risk_timeout=int(os.getenv("EXPERT_RISK_TIMEOUT", "35")),
-
-        expert_researcher_provider=os.getenv("EXPERT_RESEARCHER_PROVIDER", "groq"),
-        expert_researcher_model=os.getenv("EXPERT_RESEARCHER_MODEL", "openai/gpt-oss-120b"),
-        expert_researcher_max_tokens=int(os.getenv("EXPERT_RESEARCHER_MAX_TOKENS", "500")),
-        expert_researcher_timeout=int(os.getenv("EXPERT_RESEARCHER_TIMEOUT", "35")),
-
-        architect_provider=os.getenv("ARCHITECT_PROVIDER", "groq"),
-        architect_model=os.getenv("ARCHITECT_MODEL", "openai/gpt-oss-20b"),
-        architect_max_tokens=int(os.getenv("ARCHITECT_MAX_TOKENS", "300")),
-        architect_timeout=int(os.getenv("ARCHITECT_TIMEOUT", "35")),
-
-        chairman_provider=os.getenv("CHAIRMAN_PROVIDER", "groq"),
-        chairman_model=os.getenv("CHAIRMAN_MODEL", "openai/gpt-oss-120b"),
-        chairman_max_tokens=int(os.getenv("CHAIRMAN_MAX_TOKENS", "700")),
-        chairman_timeout=int(os.getenv("CHAIRMAN_TIMEOUT", "35")),
-
-        min_council_size=int(os.getenv("MIN_COUNCIL_SIZE", "2")),
-        max_council_size=int(os.getenv("MAX_COUNCIL_SIZE", "3")),
-        anchor_experts=tuple(os.getenv("ANCHOR_EXPERTS", "risk").split(",")),
-        default_council_keys=tuple(os.getenv("DEFAULT_COUNCIL_KEYS", "operator,analyst,risk,researcher").split(",")),
-
-        skip_debate_agreement_threshold=float(os.getenv("SKIP_DEBATE_AGREEMENT_THRESHOLD", "0.85")),
-        skip_debate_confidence_threshold=float(os.getenv("SKIP_DEBATE_CONFIDENCE_THRESHOLD", "0.6")),
-        debate_concurrency_limit=int(os.getenv("DEBATE_CONCURRENCY_LIMIT", "2")),
-
-        council_cache_ttl=int(os.getenv("COUNCIL_CACHE_TTL", "900")),
-        council_cache_maxsize=int(os.getenv("COUNCIL_CACHE_MAXSIZE", "200")),
-        max_prompt_chars=int(os.getenv("MAX_PROMPT_CHARS", "12000")),
-        max_context_chars=int(os.getenv("MAX_CONTEXT_CHARS", "28000")),
-    )
+    return AppConfig.model_validate(_env_overrides())
 
 
 cfg = get_config()
@@ -287,8 +322,17 @@ DEBATE_CONCURRENCY_LIMIT = cfg.debate_concurrency_limit
 MAX_PROMPT_CHARS = cfg.max_prompt_chars
 MAX_CONTEXT_CHARS = cfg.max_context_chars
 
-# Ordered fallback chain for Groq. These production model IDs are current as of August 2026.
-GROQ_FALLBACK_CHAIN: tuple[str, ...] = (
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-)
+GROQ_FALLBACK_CHAIN: tuple[str, ...] = cfg.groq_fallback_chain
+
+
+def all_role_configs() -> list[ModelConfig]:
+    """Every model role the council can invoke, in display order."""
+    return [*EXPERT_LIBRARY.values(), DECISION_ARCHITECT, CHAIRMAN]
+
+
+def providers_in_use() -> list[str]:
+    """Providers referenced by at least one configured role (only these need API keys)."""
+    providers = {role.provider for role in all_role_configs()}
+    if cfg.max_upload_files and cfg.vision_models:
+        providers.add(cfg.vision_provider)
+    return sorted(providers)

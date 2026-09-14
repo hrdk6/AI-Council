@@ -5,6 +5,25 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class Challenge(BaseModel):
+    """A point one council member raises against a peer during the cross-examination round."""
+
+    member: str
+    point: str
+
+
+class AttachmentSummary(BaseModel):
+    """What the council received from one uploaded file (the extracted text itself is not stored)."""
+
+    filename: str
+    kind: str  # "pdf" | "image"
+    pages: int | None = None
+    chars: int = 0
+    method: str  # "text" | "vision" | "unreadable"
+    truncated: bool = False
+    note: str | None = None
+
+
 class MemberResponse(BaseModel):
     key: str
     role_name: str
@@ -21,6 +40,8 @@ class MemberResponse(BaseModel):
     tokens_used: int | None = None
     # Populated when auto-fallback switched to a different model due to rate-limiting
     switched_from_model: str | None = None
+    # Round 2 only: which peers this member challenged, and on what
+    challenges: list[Challenge] = Field(default_factory=list)
 
 
 class CouncilResult(BaseModel):
@@ -36,7 +57,10 @@ class CouncilResult(BaseModel):
     request_id: str | None = None
     total_latency_s: float | None = None
     cached: bool = False
+    # True when a member or the chairman failed and the directive is based on partial deliberation
+    degraded: bool = False
     sources: list[str] = Field(default_factory=list)
+    attachments: list[AttachmentSummary] = Field(default_factory=list)
 
 
 class DecisionRecord(BaseModel):

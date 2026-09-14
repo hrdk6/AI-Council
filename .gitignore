@@ -23,6 +23,7 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
 .mypy_cache/
@@ -40,14 +41,18 @@ build/
 # Logs
 *.log
 logs/
+
+# Runtime data
 backend/data/
+backend/app/eval/results.json
+
+# Local tooling
+.claude/launch.json
+node_modules/
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Streamlit
-.streamlit/secrets.toml
 
 # PyInstaller
 *.manifest

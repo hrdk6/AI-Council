@@ -1,7 +1,12 @@
-fastapi>=0.111.0
-uvicorn[standard]>=0.30.0
-openai>=1.30.0
-python-dotenv>=1.0.1
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.30.0,<1.0
+openai>=1.40.0,<3.0
+python-dotenv>=1.0.1,<2.0
 python-multipart>=0.0.9
-pydantic>=2.7.0
-slowapi>=0.1.9
+pydantic>=2.7.0,<3.0
+slowapi>=0.1.9,<0.2
+# Evidence uploads
+pypdf>=5.0.0,<7.0
+cryptography>=42.0.0  # opens AES-encrypted PDFs that have no user password
+pypdfium2>=4.30.0,<6.0
+pillow>=10.4.0,<13.0

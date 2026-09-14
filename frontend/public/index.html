@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Council</title>
+  <meta name="description" content="Put a hard decision to a council of AI specialists and watch them debate it.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#06090a">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&display=swap">
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <script type="module" src="/assets/js/main.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#question">Skip to the question</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-left">
+        <a class="brand" href="/" aria-label="AI Council home">
+          <span class="brand-emblem" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" class="emblem-core"/><circle cx="12" cy="4" r="1.5"/><circle cx="19" cy="8.5" r="1.5"/><circle cx="19" cy="15.5" r="1.5"/><circle cx="12" cy="20" r="1.5"/><circle cx="5" cy="15.5" r="1.5"/><circle cx="5" cy="8.5" r="1.5"/></svg>
+          </span>
+          <span class="brand-name">AI Council</span>
+        </a>
+        <span class="topbar-divider" aria-hidden="true"></span>
+        <p class="session-status" id="session-status" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="session-status-text">Ready to deliberate</span>
+        </p>
+      </div>
+      <nav class="topbar-actions" aria-label="Sessions">
+        <button type="button" class="ghost-button" id="history-button" aria-label="Past sessions">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span class="label-long">Past sessions</span>
+          <span class="count-badge" id="history-count" hidden></span>
+        </button>
+        <button type="button" class="ghost-button" id="export-button" aria-label="Export brief" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          <span class="label-long">Export brief</span>
+        </button>
+        <button type="button" class="ghost-button icon-only" id="lock-button" aria-label="Access key" title="Access key" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Inquiry and evidence -->
+    <section class="inquiry" aria-labelledby="inquiry-title">
+      <form id="decision-form" novalidate>
+        <div class="inquiry-intro">
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Initiate deliberation</p>
+          <h1 id="inquiry-title"><label for="question">What should the council decide?</label></h1>
+          <p class="inquiry-help" id="question-help">Frame the decision, what’s at stake, and any constraints that rule an option out.</p>
+        </div>
+
+        <div class="card question-card" id="question-card">
+          <div class="locked-head" id="locked-head" hidden>
+            <span class="locked-label"><span class="pulse-dot amber" aria-hidden="true"></span>Locked in deliberation</span>
+            <span class="mono-chip">Read-only</span>
+          </div>
+          <textarea id="question" name="prompt" rows="5" required
+            placeholder="Should we move our 40-person sales team to a new CRM this quarter, or wait until January when pipeline closes?"
+            aria-describedby="question-help"></textarea>
+          <div class="question-foot">
+            <span id="consensus-note" class="consensus-note" hidden></span>
+            <span class="char-count" id="char-count" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div class="card stream-card" id="stream-card" hidden>
+          <div class="card-head">
+            <span class="card-label green"><span class="pulse-dot" aria-hidden="true"></span>Live argument stream</span>
+            <span class="mono-muted" id="stream-meta"></span>
+          </div>
+          <ol class="stream-list" id="stream-list" aria-live="polite"></ol>
+        </div>
+
+        <div class="card dropzone" id="dropzone">
+          <input type="file" id="file-input" multiple accept="application/pdf,image/png,image/jpeg,image/webp,image/gif" class="visually-hidden">
+          <span class="dropzone-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          </span>
+          <div class="dropzone-body">
+            <p class="dropzone-title"><button type="button" class="link-button" id="browse-button">Add evidence</button> or drop files here</p>
+            <p class="dropzone-hint" id="evidence-hint">PDFs and images. The Evidence Reviewer reads every file before the council deliberates.</p>
+            <ul class="evidence-list" id="evidence-list" aria-label="Attached evidence"></ul>
+          </div>
+        </div>
+
+        <div class="card modifiers">
+          <p class="section-label">Protocol modifiers</p>
+          <label class="switch-row">
+            <span class="switch-copy">
+              <span class="switch-title">Cross-examination <span class="token-badge">2× tokens</span></span>
+              <span class="switch-help">Members challenge each other’s claims before the Chairman decides.</span>
+            </span>
+            <input type="checkbox" id="debate-toggle" class="visually-hidden" checked>
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+
+        <button type="submit" class="convene" id="convene-button">
+          Convene the council
+          <kbd class="shortcut" aria-hidden="true">Ctrl ↵</kbd>
+        </button>
+
+        <div class="progress-card" id="progress-card" hidden>
+          <div class="progress-head">
+            <span class="progress-title"><span class="pulse-dot" aria-hidden="true"></span><span id="progress-title">Deliberating…</span></span>
+            <span class="progress-value" id="progress-value">0%</span>
+          </div>
+          <div class="progress-track" role="progressbar" aria-labelledby="progress-title" aria-valuemin="0" aria-valuemax="100" id="progress-bar">
+            <span class="progress-fill" id="progress-fill"></span>
+          </div>
+          <div class="progress-foot">
+            <span id="progress-stage">Framing the decision</span>
+            <button type="button" class="halt-button" id="halt-button">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 6h2v8H7zM11 6h2v8h-2z"/></svg>
+              Halt session
+            </button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- The chamber -->
+    <section class="stage" aria-label="Council chamber">
+      <div class="chamber" id="chamber">
+        <div class="chamber-glow chamber-glow-top" aria-hidden="true"></div>
+        <div class="chamber-glow chamber-glow-bottom" aria-hidden="true"></div>
+        <svg class="debate-lines" id="debate-lines" aria-hidden="true"><defs></defs></svg>
+
+        <div class="table" aria-hidden="true">
+          <span class="table-ring table-ring-outer"></span>
+          <span class="table-ring table-ring-inner"></span>
+          <span class="table-sweep"><span></span></span>
+          <div class="hud">
+            <span class="hud-pill" id="hud-pill" hidden><span class="pulse-dot" aria-hidden="true"></span><span id="hud-pill-text"></span></span>
+            <p class="hud-title" id="table-status">The council is waiting for a question.</p>
+            <p class="hud-detail" id="table-detail"></p>
+          </div>
+        </div>
+
+        <div class="seats" id="seats"></div>
+      </div>
+      <p class="visually-hidden" aria-live="polite" id="announcer"></p>
+
+      <section class="card roster" aria-labelledby="roster-title">
+        <div class="roster-head">
+          <h2 id="roster-title"><span class="eyebrow-dot" aria-hidden="true"></span>Active council roster</h2>
+          <span class="mono-muted">Each member judges the decision from a different angle</span>
+        </div>
+        <ul class="roster-grid" id="roster"></ul>
+      </section>
+
+      <article class="directive" id="directive" hidden aria-labelledby="directive-title"></article>
+
+      <section class="card floor" id="floor" hidden aria-labelledby="floor-title">
+        <div class="floor-head">
+          <h2 id="floor-title">The debate</h2>
+          <div class="floor-actions">
+            <button type="button" class="ghost-button" id="skip-button" hidden>Show everything now</button>
+            <button type="button" class="ghost-button" id="replay-button" hidden>Replay the debate</button>
+          </div>
+        </div>
+        <ol class="transcript" id="transcript"></ol>
+      </section>
+    </section>
+  </main>
+
+  <dialog class="drawer" id="history-drawer" aria-labelledby="history-title">
+    <div class="drawer-head">
+      <h2 id="history-title">Past sessions</h2>
+      <button type="button" class="ghost-button icon-only" data-close aria-label="Close past sessions">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <ul class="history-list" id="history-list"></ul>
+  </dialog>
+
+  <dialog class="modal" id="key-dialog" aria-labelledby="key-title">
+    <form method="dialog" id="key-form">
+      <h2 id="key-title">Enter the access key</h2>
+      <p>This council is private. Ask whoever runs it for the key.</p>
+      <label class="field-label" for="key-input">Access key</label>
+      <input type="password" id="key-input" autocomplete="current-password" required>
+      <label class="checkbox"><input type="checkbox" id="key-remember"> Remember on this device</label>
+      <p class="form-error" id="key-error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button type="submit" class="convene compact">Unlock</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

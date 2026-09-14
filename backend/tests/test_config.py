@@ -1,55 +1,82 @@
 """Tests for backend configuration."""
 
-import sys
-from pathlib import Path
+import pytest
+from pydantic import ValidationError
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BACKEND_DIR = PROJECT_ROOT / "backend"
-
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+from app.config import (
+    CHAIRMAN,
+    DECISION_ARCHITECT,
+    EXPERT_LIBRARY,
+    AppConfig,
+    cfg,
+    get_config,
+    providers_in_use,
+)
 
 
 def test_config_loads():
-    from app.config import CHAIRMAN, DECISION_ARCHITECT, EXPERT_LIBRARY, cfg
-    
     assert cfg is not None
-    assert isinstance(EXPERT_LIBRARY, dict)
-    assert len(EXPERT_LIBRARY) == 4
-    assert "operator" in EXPERT_LIBRARY
-    assert "analyst" in EXPERT_LIBRARY
-    assert "risk" in EXPERT_LIBRARY
-    assert "researcher" in EXPERT_LIBRARY
-    
-    assert DECISION_ARCHITECT.provider
-    assert DECISION_ARCHITECT.model
-    assert DECISION_ARCHITECT.max_tokens > 0
-    assert DECISION_ARCHITECT.timeout > 0
-    
-    assert CHAIRMAN.provider
-    assert CHAIRMAN.model
-    assert CHAIRMAN.max_tokens > 0
-    assert CHAIRMAN.timeout > 0
+    assert set(EXPERT_LIBRARY) == {"operator", "analyst", "risk", "researcher"}
+
+    for role in (DECISION_ARCHITECT, CHAIRMAN):
+        assert role.provider
+        assert role.model
+        assert role.max_tokens > 0
+        assert role.timeout > 0
 
 
 def test_config_from_env(monkeypatch):
     monkeypatch.setenv("EXPERT_OPERATOR_MODEL", "test-model")
-    monkeypatch.setenv("EXPERT_OPERATOR_MAX_TOKENS", "500")
-    
-    # Need to clear the lru_cache
-    from app.config import get_config
+    monkeypatch.setenv("EXPERT_OPERATOR_MAX_TOKENS", "512")
     get_config.cache_clear()
-    
-    # Re-import to get fresh config
-    import importlib
 
-    import app.config
-    importlib.reload(app.config)
-    from app.config import cfg
-    
-    assert cfg.expert_operator_model == "test-model"
-    assert cfg.expert_operator_max_tokens == 500
-    
+    config = get_config()
+    assert config.expert_operator_model == "test-model"
+    assert config.expert_operator_max_tokens == 512
+
+
+def test_blank_env_values_fall_back_to_defaults(monkeypatch):
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "")
     get_config.cache_clear()
+    assert get_config().rate_limit_requests == 10
+
+
+def test_comma_separated_values_are_parsed():
+    config = AppConfig.model_validate({
+        "allowed_origins": "http://a.test, http://b.test",
+        "anchor_experts": "risk,analyst",
+        "groq_fallback_chain": "model-a,model-b",
+    })
+    assert config.allowed_origins == ["http://a.test", "http://b.test"]
+    assert config.anchor_experts == ("risk", "analyst")
+    assert config.groq_fallback_chain == ("model-a", "model-b")
+
+
+def test_invalid_numbers_raise_clear_errors():
+    with pytest.raises(ValidationError, match="rate_limit_requests"):
+        AppConfig.model_validate({"rate_limit_requests": "lots"})
+
+
+def test_unknown_expert_keys_rejected():
+    with pytest.raises(ValidationError, match="Unknown expert keys"):
+        AppConfig.model_validate({"default_council_keys": "operator,wizard"})
+
+
+def test_min_council_size_cannot_exceed_max():
+    with pytest.raises(ValidationError, match="MIN_COUNCIL_SIZE"):
+        AppConfig.model_validate({"min_council_size": 5, "max_council_size": 2})
+
+
+def test_production_requires_api_key():
+    with pytest.raises(ValidationError, match="API_KEY must be set"):
+        AppConfig.model_validate({"environment": "production"})
+    assert AppConfig.model_validate({"environment": "production", "api_key": "secret"}).is_production
+
+
+def test_production_rejects_wildcard_cors():
+    with pytest.raises(ValidationError, match="ALLOWED_ORIGINS"):
+        AppConfig.model_validate({"environment": "production", "api_key": "k", "allowed_origins": "*"})
+
+
+def test_providers_in_use_reflects_roles():
+    assert providers_in_use() == sorted({role.provider for role in [*EXPERT_LIBRARY.values(), CHAIRMAN]})

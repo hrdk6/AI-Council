@@ -1,49 +1,27 @@
-version: '3.8'
+name: ai-council
+
+# Usage: copy .env.example to .env, set GROQ_API_KEY and API_KEY, then `docker compose up --build`.
+# Open http://localhost:8000 and enter the API_KEY value when the app asks for the access key.
 
 services:
-  backend:
+  council:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Fixed so a local-development ENVIRONMENT value in .env cannot weaken the container.
+      ENVIRONMENT: production
+      API_KEY: ${API_KEY:?Set API_KEY in .env to a long random string}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8000}
+      DATABASE_PATH: /app/data/ai_council.db
     ports:
       - "8000:8000"
-    environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - API_KEY=${API_KEY}
-      - ALLOWED_ORIGINS=http://localhost:8501
-      - RATE_LIMIT_REQUESTS=10
-      - RATE_LIMIT_WINDOW=60
-      - LOG_LEVEL=INFO
-      - ENVIRONMENT=production
-      - DEFAULT_BACKEND_URL=http://backend:8000
-      - ALLOWED_BACKEND_DOMAINS=localhost
-    env_file:
-      - .env
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    volumes:
+      - council-data:/app/data
+    restart: unless-stopped
 
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    ports:
-      - "8501:8501"
-    environment:
-      - DEFAULT_BACKEND_URL=http://backend:8000
-      - ALLOWED_BACKEND_DOMAINS=localhost
-    env_file:
-      - .env
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+volumes:
+  council-data:
