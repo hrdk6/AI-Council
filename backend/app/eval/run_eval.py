@@ -1,25 +1,8 @@
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
+"""Offline evaluation harness: runs the gold dataset through the live council.
 
+Usage (from backend/): python -m app.eval.run_eval
+Requires real provider API keys; results are written next to this file.
+"""
 
 import asyncio
 import json
@@ -56,6 +39,7 @@ async def run_one(case: dict) -> dict:
             "agreement_score": result.agreement_score,
             "confidence_score": result.confidence_score,
             "debate_skipped": result.debate_skipped,
+            "degraded": result.degraded,
             "member_failures": [m.role_name for m in result.round1 + result.round2 if not m.success],
             "missing_required_headings": missing_headings,
             "directive_complete": not missing_headings,
@@ -71,13 +55,13 @@ async def run_one(case: dict) -> dict:
 
 
 async def main() -> None:
-    dataset = json.loads(DATASET_PATH.read_text())
+    dataset = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
     results = []
     for case in dataset["cases"]:
         print(f"Running {case['id']}...")
         results.append(await run_one(case))
 
-    RESULTS_PATH.write_text(json.dumps(results, indent=2))
+    RESULTS_PATH.write_text(json.dumps(results, indent=2), encoding="utf-8")
     successes = [r for r in results if r["success"]]
     print(f"\n{len(successes)}/{len(results)} cases completed.")
     if successes:

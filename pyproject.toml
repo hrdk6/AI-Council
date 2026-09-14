@@ -1,0 +1,45 @@
+# Python tooling configuration. Runtime dependencies live in backend/requirements.txt.
+# The web interface (frontend/) is plain JavaScript; its tests run with `npm test`.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [".venv", "backend/data"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle / pyflakes
+    "I",             # import sorting
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "S",             # bandit security checks
+    "BLE",           # blind except
+    "SIM",           # simplifications
+    "RUF",           # ruff-specific
+]
+ignore = [
+    "E501",    # long lines are handled by the formatter where it matters
+    "S104",    # binding to 0.0.0.0 is intentional inside containers
+    "SIM117",  # nested with-statements read better in some tests
+    "RUF001",  # typographic characters in UI copy are intentional
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106", "S108", "BLE001"]
+"backend/app/main.py" = ["E402"]  # .env must be loaded before config is imported
+"backend/tests/conftest.py" = ["E402"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI parameter declarations are evaluated once by design.
+extend-immutable-calls = ["fastapi.File", "fastapi.Form", "fastapi.Query", "fastapi.Path", "fastapi.Security", "fastapi.Depends"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+[tool.mypy]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["tests/", "\\.venv/"]

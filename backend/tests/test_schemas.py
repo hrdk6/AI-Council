@@ -32,7 +32,7 @@ def test_member_response_with_data():
 def test_council_result():
     member1 = MemberResponse(key="m1", role_name="M1", model="m1", provider="p1", success=True)
     member2 = MemberResponse(key="m2", role_name="M2", model="m2", provider="p2", success=True)
-    
+
     result = CouncilResult(
         question="Test question",
         decision_charter="Test charter",
@@ -40,7 +40,7 @@ def test_council_result():
         round2=[member2],
         final_answer="Test answer",
     )
-    
+
     assert result.question == "Test question"
     assert len(result.round1) == 1
     assert len(result.round2) == 1
@@ -52,7 +52,7 @@ def test_health_response():
     assert health.status == "ok"
     assert health.version == "1.0.0"
     assert health.providers_missing == []
-    
+
     health_degraded = HealthResponse(status="degraded", providers_missing=["groq (GROQ_API_KEY)"])
     assert health_degraded.status == "degraded"
     assert "groq" in health_degraded.providers_missing[0]

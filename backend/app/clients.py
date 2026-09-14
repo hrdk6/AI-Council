@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
@@ -50,9 +51,26 @@ def get_client(provider: str) -> AsyncOpenAI:
     )
 
 
-def check_provider_keys_present() -> list[str]:
+async def close_clients() -> None:
+    """Close pooled HTTP connections for every client created so far."""
+    for provider in PROVIDER_BASE_URLS:
+        try:
+            if os.getenv(PROVIDER_ENV_KEYS[provider]):
+                await get_client(provider).close()
+        except Exception:
+            logger.debug("Failed to close %s client", provider, exc_info=True)
+    get_client.cache_clear()
+
+
+def check_provider_keys_present(providers: Iterable[str] | None = None) -> list[str]:
+    """Return ``"provider (ENV_KEY)"`` entries for providers whose API key is missing.
+
+    Pass ``providers`` to check only the providers actually in use.
+    """
+    selected = PROVIDER_ENV_KEYS.keys() if providers is None else providers
     missing = []
-    for provider, env_key in PROVIDER_ENV_KEYS.items():
+    for provider in selected:
+        env_key = PROVIDER_ENV_KEYS[provider]
         if not os.getenv(env_key):
             missing.append(f"{provider} ({env_key})")
     return missing
