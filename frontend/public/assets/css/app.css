@@ -741,6 +741,11 @@ input:disabled + .switch { opacity: 0.5; }
 .confidence-bar { width: 72px; height: 4px; border-radius: 999px; background: var(--obsidian-750); overflow: hidden; }
 .confidence-fill { display: block; height: 100%; border-radius: inherit; background: var(--voice); transition: width 0.8s var(--ease-out); }
 .statement-risk strong { color: var(--text-400); font-weight: 600; }
+.statement-backup {
+  padding: 2px 8px; border-radius: 6px;
+  background: rgba(229, 184, 105, 0.08); border: 1px solid rgba(229, 184, 105, 0.25);
+  color: var(--amber); font: 11px var(--font-mono);
+}
 .statement-error { margin: 8px 0 0; color: var(--danger); font-size: 13px; }
 .is-typing .statement-body > :last-child::after,
 .is-typing.statement-recommendation::after {

@@ -38,8 +38,9 @@ class MemberResponse(BaseModel):
     round: int = 1
     latency_s: float | None = None
     tokens_used: int | None = None
-    # Populated when auto-fallback switched to a different model due to rate-limiting
+    # Populated when a backup model answered: the model that was tried first, and why it was skipped
     switched_from_model: str | None = None
+    switch_reason: str | None = None
     # Round 2 only: which peers this member challenged, and on what
     challenges: list[Challenge] = Field(default_factory=list)
 

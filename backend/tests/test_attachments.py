@@ -151,6 +151,48 @@ class TestPipeline:
         assert "vision model" in result.summary().note
 
 
+class TestVisionFallback:
+    async def test_paused_vision_model_is_skipped(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from app.routing import MODEL_HEALTH, ModelRef
+
+        monkeypatch.setattr(cfg, "vision_models", ("vision-a", "vision-b"))
+        MODEL_HEALTH.rate_limited(ModelRef(cfg.vision_provider, "vision-a"), 60)
+        response = MagicMock()
+        response.choices = [MagicMock(message=MagicMock(content="read by b"))]
+        create = AsyncMock(return_value=response)
+        client = MagicMock()
+        client.chat.completions.create = create
+        monkeypatch.setattr(attachments, "get_client", lambda provider: client)
+
+        assert await attachments.read_with_vision(b"\xff\xd8\xff", "an image") == "read by b"
+        assert [call.kwargs["model"] for call in create.await_args_list] == ["vision-b"]
+
+    async def test_rate_limited_vision_model_moves_to_next_and_pauses(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import httpx
+        import openai
+
+        from app.routing import MODEL_HEALTH, ModelRef
+
+        monkeypatch.setattr(cfg, "vision_models", ("vision-a", "vision-b"))
+        limited = openai.RateLimitError(
+            "Error code: 429 try again in 12s",
+            response=httpx.Response(429, request=httpx.Request("POST", "https://x")), body=None,
+        )
+        ok = MagicMock()
+        ok.choices = [MagicMock(message=MagicMock(content="read by b"))]
+        create = AsyncMock(side_effect=[limited, ok])
+        client = MagicMock()
+        client.chat.completions.create = create
+        monkeypatch.setattr(attachments, "get_client", lambda provider: client)
+
+        assert await attachments.read_with_vision(b"\xff\xd8\xff", "an image") == "read by b"
+        assert MODEL_HEALTH.cooldown(ModelRef(cfg.vision_provider, "vision-a"))[0] > 10
+
+
 class TestEvidenceContext:
     def test_returns_none_without_readable_evidence(self):
         assert build_evidence_context([Attachment("x.pdf", "pdf", method="unreadable")]) is None

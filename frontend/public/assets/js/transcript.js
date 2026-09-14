@@ -167,7 +167,9 @@ export class Transcript {
       foot.append(h("span", { class: "statement-risk" }, h("strong", { text: "Key risk: " }), member.key_risk));
     }
     if (member.switched_from_model) {
-      foot.append(h("span", { text: `Answered by ${member.model} after ${member.switched_from_model} was busy` }));
+      const short = (model) => String(model ?? "").split("/").pop();
+      const why = member.switch_reason ?? "unavailable";
+      foot.append(h("span", { class: "statement-backup", text: `Backup model: ${short(member.model)} answered (${short(member.switched_from_model)} was ${why})` }));
     }
     body.append(foot);
 

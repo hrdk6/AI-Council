@@ -99,6 +99,10 @@ function shortName(key) {
   return (names()[key] ?? key).replace(/^The /, "");
 }
 
+function shortModel(model) {
+  return String(model ?? "").split("/").pop();
+}
+
 function announce(message) {
   els.announcer.textContent = message;
 }
@@ -149,7 +153,9 @@ function onSeatState(key, { state: seatState, label }) {
   card.classList.toggle("is-active", seatState === "thinking" || seatState === "speaking");
   card.classList.toggle("is-failed", seatState === "failed");
   let badge = label || defaults[seatState] || "Seated";
-  if (seatState === "thinking") badge = key === "chairman" ? "Synthesizing" : "Thinking";
+  if (seatState === "thinking") {
+    badge = label.startsWith("Backup model") ? "Backup model" : key === "chairman" ? "Synthesizing" : "Thinking";
+  }
   card.querySelector(".roster-badge").textContent = badge;
 }
 
@@ -307,6 +313,13 @@ function handleEvent(name, data) {
     case "member_started":
       chamber.setLive(data.key, "thinking", data.round === 2 ? "Preparing a challenge" : "Preparing a statement");
       break;
+    case "model_switched": {
+      // A backup model took over; keep the seat thinking but say why.
+      const label = `Backup model · ${shortModel(data.from_model)} ${data.reason}`;
+      chamber.setLive(data.key, "thinking", label);
+      announce(`${names()[data.key] ?? data.key} switched to ${shortModel(data.to_model)} because ${shortModel(data.from_model)} was ${data.reason}.`);
+      break;
+    }
     case "member_done":
       bumpProgress();
       if (!data.success) chamber.setLive(data.key, "failed", "Unavailable");

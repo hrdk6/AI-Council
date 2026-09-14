@@ -82,6 +82,10 @@ class Metrics:
     provider_failures: dict[str, int] = field(default_factory=dict)
     provider_tokens: dict[str, int] = field(default_factory=dict)
     http_responses: dict[str, int] = field(default_factory=dict)
+    model_switches: dict[str, int] = field(default_factory=dict)
+
+    def record_model_switch(self, reason: str) -> None:
+        self.model_switches[reason] = self.model_switches.get(reason, 0) + 1
 
     def record_llm_call(self, provider: str, tokens: int, latency_s: float, success: bool) -> None:
         self.total_llm_calls += 1
@@ -115,6 +119,7 @@ class Metrics:
                 "cache_hit_rate": round(self.total_cache_hits / self.total_requests, 3) if self.total_requests else 0.0,
             },
             "http_responses": dict(self.http_responses),
+            "model_switches": dict(self.model_switches),
             "llm_calls": {
                 "total": self.total_llm_calls,
                 "failures": self.total_llm_failures,

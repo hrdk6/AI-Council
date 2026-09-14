@@ -78,8 +78,16 @@ class AppConfig(BaseModel):
     chairman_max_tokens: int = Field(default=1200, ge=1, le=8192)
     chairman_timeout: int = Field(default=35, ge=1, le=300)
 
-    # Ordered Groq fallback chain used when a Groq model is rate-limited or unavailable
-    groq_fallback_chain: tuple[str, ...] = ("openai/gpt-oss-20b", "openai/gpt-oss-120b")
+    # Backup models. A Groq role tries its own model, then every other model in this chain. Each Groq
+    # model has its own rate limit, so a longer chain means more headroom before a member fails.
+    groq_fallback_chain: tuple[str, ...] = (
+        "openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b", "qwen/qwen3.6-27b",
+    )
+    # Optional cross-provider backups tried after the chain, as provider:model. Entries whose
+    # provider has no API key are skipped. Example: gemini:gemini-2.5-flash
+    backup_models: tuple[str, ...] = ()
+    # Pause for a rate-limited model when the provider doesn't say how long to wait.
+    rate_limit_cooldown_s: float = Field(default=30.0, ge=1.0, le=3600.0)
 
     # gpt-oss models reason before answering and those tokens count against max_tokens. At the default
     # effort they can spend the whole budget reasoning and return nothing; "low" keeps answers complete.
@@ -154,13 +162,25 @@ class AppConfig(BaseModel):
         return v
 
     @field_validator(
-        "allowed_origins", "groq_fallback_chain", "vision_models", "anchor_experts", "default_council_keys",
+        "allowed_origins", "groq_fallback_chain", "backup_models", "vision_models", "anchor_experts",
+        "default_council_keys",
         mode="before",
     )
     @classmethod
     def split_comma_separated(cls, v: Any) -> Any:
         if isinstance(v, str):
             return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
+    @field_validator("backup_models")
+    @classmethod
+    def validate_backup_models(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        for entry in v:
+            provider, separator, model = entry.partition(":")
+            if not separator or provider not in VALID_PROVIDERS or not model.strip():
+                raise ValueError(
+                    f"Invalid BACKUP_MODELS entry '{entry}'. Use provider:model, for example gemini:gemini-2.5-flash."
+                )
         return v
 
     @field_validator("anchor_experts", "default_council_keys")

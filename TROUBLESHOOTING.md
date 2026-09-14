@@ -282,6 +282,22 @@ DEBATE_CONCURRENCY_LIMIT=1  # Default: 2
 
 ## Auto-Switching Issues
 
+### See which models are paused
+
+Open `/v1/providers` on your server (for example `https://your-app.onrender.com/v1/providers`). The `models`
+list shows every model the council may use, with `"status": "paused"`, the reason, and `retry_in_s` for any model
+being skipped. Pauses clear on their own; restarting the server clears them immediately.
+
+### Old two-model chain in your environment
+
+If your `.env` or Render environment still sets `GROQ_FALLBACK_CHAIN=openai/gpt-oss-20b,openai/gpt-oss-120b`,
+it overrides the new four-model default. Remove the variable or add `qwen/qwen3.8-27b,qwen/qwen3.6-27b`.
+
+### Adding backups from another provider
+
+Set that provider's key (for example `GEMINI_API_KEY`) and `BACKUP_MODELS=gemini:gemini-2.5-flash`. Backups on a
+provider without a key are skipped silently, so a typo in the key name means they're never used.
+
 ### Not Seeing ⚡ Indicator
 
 **Symptom:** Models switch but no indicator shows

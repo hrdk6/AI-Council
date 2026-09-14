@@ -43,6 +43,7 @@ from .config import CHAIRMAN, EXPERT_LIBRARY, all_role_configs, cfg, providers_i
 from .council import CouncilUnavailableError, run_council
 from .history import check_database, get_decision, list_decisions, save_decision, save_feedback
 from .observability import METRICS, REQUEST_ID, new_request_id, setup_logging
+from .routing import MODEL_HEALTH, ModelRef, candidates_for
 from .schemas import CouncilResult, DecisionRecord, FeedbackInput, HealthResponse
 
 setup_logging()
@@ -275,9 +276,17 @@ async def providers():
             for name in PROVIDER_ENV_KEYS
         ],
         "roles": [
-            {"role": item.role_name, "provider": item.provider, "model": item.model}
+            {
+                "role": item.role_name, "provider": item.provider, "model": item.model,
+                "backups": [str(ref) for ref in candidates_for(item)[1:]],
+            }
             for item in all_role_configs()
         ],
+        # Current state of every model the council may use; paused models are skipped automatically.
+        "models": MODEL_HEALTH.snapshot(
+            [ref for item in all_role_configs() for ref in candidates_for(item)]
+            + [ModelRef(cfg.vision_provider, model) for model in cfg.vision_models]
+        ),
     }
 
 

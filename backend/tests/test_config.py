@@ -52,6 +52,19 @@ def test_comma_separated_values_are_parsed():
     assert config.groq_fallback_chain == ("model-a", "model-b")
 
 
+def test_backup_models_parsed_and_validated():
+    config = AppConfig.model_validate({"backup_models": "gemini:gemini-2.5-flash, openrouter:meta-llama/llama-3.3-70b:free"})
+    assert config.backup_models == ("gemini:gemini-2.5-flash", "openrouter:meta-llama/llama-3.3-70b:free")
+    with pytest.raises(ValidationError, match="BACKUP_MODELS"):
+        AppConfig.model_validate({"backup_models": "gemini-2.5-flash"})
+    with pytest.raises(ValidationError, match="BACKUP_MODELS"):
+        AppConfig.model_validate({"backup_models": "anthropic:claude"})
+
+
+def test_default_chain_has_several_groq_backups():
+    assert len(AppConfig().groq_fallback_chain) >= 4
+
+
 def test_invalid_numbers_raise_clear_errors():
     with pytest.raises(ValidationError, match="rate_limit_requests"):
         AppConfig.model_validate({"rate_limit_requests": "lots"})

@@ -294,6 +294,20 @@ def test_providers_flags_providers_in_use(test_client):
     assert providers["gemini"]["in_use"] is False
 
 
+def test_providers_lists_backups_and_paused_models(test_client):
+    from app.routing import MODEL_HEALTH, ModelRef
+
+    client, _ = test_client
+    MODEL_HEALTH.rate_limited(ModelRef("groq", "openai/gpt-oss-20b"), 45)
+    data = client.get("/v1/providers").json()
+    chairman = next(role for role in data["roles"] if role["role"] == "Chairman")
+    assert "groq:openai/gpt-oss-20b" in chairman["backups"]
+    models = {f"{row['provider']}:{row['model']}": row for row in data["models"]}
+    assert models["groq:openai/gpt-oss-20b"]["status"] == "paused"
+    assert models["groq:openai/gpt-oss-20b"]["reason"] == "rate-limited"
+    assert models["groq:openai/gpt-oss-120b"]["status"] == "ok"
+
+
 def test_public_config_describes_ui_without_secrets(test_client):
     client, _ = test_client
     data = client.get("/v1/config").json()

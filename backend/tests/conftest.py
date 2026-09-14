@@ -24,8 +24,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def clear_config_cache():
-    """Clear config cache between tests."""
+    """Clear config cache and shared model cooldowns between tests."""
     from app.config import get_config
+    from app.routing import MODEL_HEALTH
     get_config.cache_clear()
+    MODEL_HEALTH.reset()
     yield
+    MODEL_HEALTH.reset()
     get_config.cache_clear()

@@ -22,6 +22,7 @@ from .clients import get_client
 from .config import cfg
 from .council import _is_retriable, _retry_wait_seconds, _strip_think_tags
 from .observability import METRICS
+from .routing import MODEL_HEALTH, ModelRef, classify_error, retry_after_seconds
 from .schemas import AttachmentSummary
 
 logger = logging.getLogger("attachments")
@@ -181,6 +182,11 @@ async def read_with_vision(jpeg: bytes, instruction: str, request_id: str = "-")
     url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
     last_error: Exception | None = None
     for model in cfg.vision_models:
+        ref = ModelRef(cfg.vision_provider, model)
+        paused_for, _ = MODEL_HEALTH.cooldown(ref)
+        if paused_for > 0:  # rate-limited by an earlier call (text or vision); try the next model
+            logger.info("[%s] skipping vision %s, paused for %.1fs", request_id, ref, paused_for)
+            continue
         for attempt in range(2):
             started = time.perf_counter()
             try:
@@ -200,6 +206,7 @@ async def read_with_vision(jpeg: bytes, instruction: str, request_id: str = "-")
                 tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
                 METRICS.record_llm_call(cfg.vision_provider, tokens, time.perf_counter() - started, success=bool(text))
                 if text:
+                    MODEL_HEALTH.succeeded(ref)
                     logger.info("[%s] vision %s read image in %.2fs", request_id, model, time.perf_counter() - started)
                     return text
                 last_error = RuntimeError("empty response")
@@ -207,6 +214,11 @@ async def read_with_vision(jpeg: bytes, instruction: str, request_id: str = "-")
                 METRICS.record_llm_call(cfg.vision_provider, 0, time.perf_counter() - started, success=False)
                 last_error = error
                 logger.warning("[%s] vision %s attempt %d failed: %s", request_id, model, attempt + 1, error)
+                if classify_error(error) == "rate_limit":
+                    # Pause this model for every caller and move straight to the next vision model.
+                    hint = retry_after_seconds(error)
+                    MODEL_HEALTH.rate_limited(ref, hint + 0.5 if hint is not None else cfg.rate_limit_cooldown_s)
+                    break
                 if not _is_retriable(error):
                     break
                 if attempt == 0:

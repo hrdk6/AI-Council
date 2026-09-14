@@ -58,10 +58,20 @@ Browser ──► FastAPI (one process, port 8000)
 
 - **Models:** Groq by default (`openai/gpt-oss-20b` and `-120b` for the council, `qwen/qwen3.8-27b` for
   vision). Every role's provider and model is configurable. NVIDIA NIM, Gemini, and OpenRouter are supported too.
-- **Resilience:** transient failures (429, 5xx, timeouts, empty answers) are retried with backoff that follows
-  the provider's `Retry-After`, and Groq roles fall back along `GROQ_FALLBACK_CHAIN`. `gpt-oss` models run with
-  low reasoning effort so their hidden reasoning can't consume the whole token budget. A directive cut off by the
-  token limit is retried once with more room. Partial results are flagged and never cached.
+- **Automatic backup models:** when a model is rate-limited or fails, that council member switches to a backup
+  and carries on. Every role tries its configured model, then every other model in `GROQ_FALLBACK_CHAIN`
+  (`gpt-oss-20b`, `gpt-oss-120b`, `qwen3.8-27b`, `qwen3.6-27b` by default), then any cross-provider
+  `BACKUP_MODELS` whose API key is set.
+  - A rate-limited model is paused for everyone for as long as the provider asks, so members running in
+    parallel skip it instead of each hitting the limit.
+  - A rejected API key skips the whole provider; a retired model is benched for 10 minutes; flaky models are
+    retried after the others have been tried. If every model is paused, a short wait (up to 15 seconds) is
+    waited out; longer ones fail fast with a clear message.
+  - The seat and roster show "Backup model" when a switch happens, the transcript names the model that
+    answered, and `GET /v1/providers` lists each role's backups and any paused models.
+- **Resilience:** `gpt-oss` models run with low reasoning effort (and Qwen with reasoning off) so hidden reasoning
+  can't consume the whole token budget. A directive cut off by the token limit is retried once with more room.
+  Partial results are flagged and never cached.
 
 ## Quick start
 
@@ -119,6 +129,9 @@ Every setting is an environment variable; see [.env.example](.env.example) for t
 | `API_KEY` | Access key. The web interface asks for it once; API clients send `X-API-Key`. **Required in production.** |
 | `ENVIRONMENT` | `development`, `staging`, `production`, or `test`. Production turns on JSON logs, hides error details, and disables `/docs`. |
 | `<ROLE>_PROVIDER` / `<ROLE>_MODEL` / `<ROLE>_MAX_TOKENS` | Per role: `EXPERT_OPERATOR`, `EXPERT_ANALYST`, `EXPERT_RISK`, `EXPERT_RESEARCHER`, `ARCHITECT`, `CHAIRMAN`. |
+| `GROQ_FALLBACK_CHAIN` | Groq models every role can switch to, in order. |
+| `BACKUP_MODELS` | Optional cross-provider backups as `provider:model`, e.g. `gemini:gemini-2.5-flash`. Used only when that provider's key is set. |
+| `RATE_LIMIT_COOLDOWN_S` | How long a rate-limited model is skipped when the provider gives no retry time (default 30). |
 | `REASONING_EFFORT` | Reasoning effort for `gpt-oss` models (default `low`). |
 | `VISION_MODELS` | Vision models for images and scanned PDFs, tried in order. |
 | `MAX_UPLOAD_FILES`, `MAX_PDF_MB`, `MAX_IMAGE_MB`, `MAX_PDF_PAGES`, `MAX_OCR_PAGES` | Upload limits. Set `MAX_UPLOAD_FILES=0` to turn uploads off. |
