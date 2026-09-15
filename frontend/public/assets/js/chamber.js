@@ -7,13 +7,34 @@ const MONOGRAMS = { chairman: "C", operator: "O", analyst: "A", risk: "R", resea
 const SHORT_NAMES = { chairman: "Chairman", operator: "Operator", analyst: "Analyst", risk: "Risk Officer", researcher: "Evidence" };
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/** [label, tone] for how much the council disagrees, from the 0–1 agreement score. */
+export function friction(agreement) {
+  if (agreement >= 0.7) return ["Low", "low"];
+  if (agreement >= 0.45) return ["Moderate", "moderate"];
+  return ["High", "high"];
+}
+
+/** The member challenged most often, or null when nobody has been challenged. Ties go to the first challenged. */
+export function mostChallenged(challenges) {
+  const counts = new Map();
+  for (const { to } of challenges) counts.set(to, (counts.get(to) ?? 0) + 1);
+  let best = null;
+  for (const [key, count] of counts) if (best === null || count > counts.get(best)) best = key;
+  return best;
+}
+
+function hudTile(label, value, tone) {
+  return h("span", { class: "hud-tile" }, `${label}: `, h("strong", { class: `tone-${tone}`, text: value }));
+}
+
 export class Chamber {
-  constructor({ chamberEl, seatsEl, linesEl, statusEl, detailEl, pillEl, pillTextEl, onSeatSelect, onStateChange }) {
+  constructor({ chamberEl, seatsEl, linesEl, statusEl, detailEl, tilesEl, pillEl, pillTextEl, onSeatSelect, onStateChange }) {
     this.chamberEl = chamberEl;
     this.seatsEl = seatsEl;
     this.linesEl = linesEl;
     this.statusEl = statusEl;
     this.detailEl = detailEl;
+    this.tilesEl = tilesEl;
     this.pillEl = pillEl;
     this.pillTextEl = pillTextEl;
     this.onSeatSelect = onSeatSelect;
@@ -44,7 +65,8 @@ export class Chamber {
         },
         h("span", { class: "seat-avatar-wrap" },
           h("span", { class: "seat-halo", "aria-hidden": "true" }),
-          h("span", { class: "seat-avatar", "aria-hidden": "true", text: MONOGRAMS[key] ?? roleName[0] })),
+          h("span", { class: "seat-avatar", "aria-hidden": "true", text: MONOGRAMS[key] ?? roleName[0] }),
+          key === "chairman" ? h("span", { class: "seat-tag", "aria-hidden": "true", text: "Lead" }) : null),
         h("span", { class: "seat-name", text: SHORT_NAMES[key] ?? roleName.replace(/^The /, "") })));
       this.seatsEl.append(seat);
       this.seats.set(key, seat);
@@ -93,6 +115,7 @@ export class Chamber {
 
   renderHud() {
     const { status, detail, consensus } = this.hud;
+    this.renderTiles();
     if (consensus === null) {
       this.statusEl.textContent = status;
       this.detailEl.textContent = detail;
@@ -100,6 +123,22 @@ export class Chamber {
     }
     this.statusEl.replaceChildren("Consensus index: ", h("span", { class: "hud-figure", text: `${Math.round(consensus * 100)}%` }));
     this.detailEl.textContent = [status, detail].filter(Boolean).join(". ");
+  }
+
+  /** Friction from how far apart the recommendations are; contention is whoever has drawn the most challenges. */
+  renderTiles() {
+    if (!this.tilesEl) return;
+    const { consensus } = this.hud;
+    if (consensus === null) {
+      this.tilesEl.hidden = true;
+      return;
+    }
+    const tiles = [hudTile("Friction", ...friction(consensus))];
+    const target = mostChallenged(this.challenges);
+    if (target) tiles.push(hudTile("Contention", SHORT_NAMES[target] ?? target, "high"));
+    else tiles.push(hudTile("Seated", String(Math.max(0, this.seated.size - 1)), "low"));
+    this.tilesEl.replaceChildren(...tiles);
+    this.tilesEl.hidden = false;
   }
 
   /* ── Seats ── */
@@ -244,6 +283,7 @@ export class Chamber {
   async drawChallenge(fromKey, toKey, { instant = false } = {}) {
     if (!this.seats.has(fromKey) || !this.seats.has(toKey) || fromKey === toKey) return;
     this.challenges.push({ from: fromKey, to: toKey });
+    this.renderTiles();
     const drawn = this.addLine(fromKey, toKey);
     if (!drawn || instant || prefersReducedMotion()) return;
 

@@ -1,4 +1,4 @@
-import { ApiError, fetchConfig, fetchHistory, getAccessKey, setAccessKey, streamDecision } from "./api.js";
+import { ApiError, fetchConfig, fetchHistory, fetchTelemetry, getAccessKey, setAccessKey, streamDecision } from "./api.js";
 import { Chamber } from "./chamber.js";
 import { h, prefersReducedMotion, wait } from "./dom.js";
 import { EvidenceTray } from "./evidence.js";
@@ -52,6 +52,10 @@ const state = {
   progress: { done: 0, total: 1, seats: 3, files: 0, research: 0 },
   stream: [],
   turn: 0,
+  tokens: 0,
+  startedAt: 0,
+  clock: null,
+  typicalRun: null,
 };
 
 const els = {
@@ -60,6 +64,16 @@ const els = {
   questionCard: $("question-card"),
   lockedHead: $("locked-head"),
   consensusNote: $("consensus-note"),
+  tokensNote: $("tokens-note"),
+  elapsed: $("progress-elapsed"),
+  catchUp: $("catch-up-button"),
+  statMembers: $("stat-members"),
+  statTimeLabel: $("stat-time-label"),
+  statTime: $("stat-time"),
+  footerLatency: $("footer-latency"),
+  footerModels: $("footer-models"),
+  footerResearch: $("footer-research"),
+  footerResearchSep: $("footer-research-sep"),
   charCount: $("char-count"),
   debate: $("debate-toggle"),
   research: $("research-toggle"),
@@ -232,6 +246,68 @@ function renderProgress() {
   els.progressBar.setAttribute("aria-valuenow", String(value));
 }
 
+/* ── Run telemetry: elapsed time, tokens, and the stat tiles ── */
+
+function formatSeconds(seconds) {
+  const whole = Math.max(0, Math.round(seconds));
+  return whole < 60 ? `${whole} sec` : `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, "0")}s`;
+}
+
+function setTokens(tokens) {
+  state.tokens = tokens;
+  els.tokensNote.hidden = !tokens;
+  els.tokensNote.textContent = tokens ? `Tokens used: ${tokens.toLocaleString()}` : "";
+}
+
+function resultTokens(result) {
+  return [...(result.round1 ?? []), ...(result.round2 ?? [])].reduce((sum, member) => sum + (member.tokens_used || 0), 0);
+}
+
+function setStatTime(label, value) {
+  els.statTimeLabel.textContent = label;
+  els.statTime.textContent = value;
+}
+
+function setMembersStat(seated) {
+  const total = state.config.members.length;
+  els.statMembers.textContent = seated ? `${seated} of ${total}` : `${total} on call`;
+}
+
+function showIdleStats() {
+  setMembersStat(0);
+  setStatTime("Typical run", state.typicalRun ? `~${formatSeconds(state.typicalRun)}` : "—");
+}
+
+function startClock() {
+  stopClock();
+  state.startedAt = performance.now();
+  const tick = () => {
+    const seconds = (performance.now() - state.startedAt) / 1000;
+    els.elapsed.textContent = `Elapsed ${formatSeconds(seconds)}`;
+    setStatTime("Elapsed", formatSeconds(seconds));
+  };
+  tick();
+  state.clock = setInterval(tick, 1000);
+}
+
+function stopClock() {
+  if (state.clock) clearInterval(state.clock);
+  state.clock = null;
+}
+
+async function refreshTelemetry() {
+  try {
+    const { latencyMs, ready, paused } = await fetchTelemetry();
+    els.footerLatency.textContent = `Latency: ${latencyMs}ms`;
+    els.footerModels.textContent = paused ? `Models: ${ready} ready · ${paused} paused` : `Models: ${ready} ready`;
+    els.footerModels.className = paused ? "is-amber" : "is-green";
+  } catch {
+    els.footerLatency.textContent = "Latency: —";
+    els.footerModels.textContent = "Server unreachable";
+    els.footerModels.className = "is-amber";
+  }
+}
+
 /* ── Phases ── */
 
 function setPhase(id) {
@@ -352,6 +428,7 @@ function handleEvent(name, data) {
       break;
     case "charter_ready": {
       const council = data.council ?? [];
+      setMembersStat(council.length);
       state.progress.seats = council.length || state.progress.seats;
       bumpProgress();
       setPhase("opening");
@@ -374,6 +451,7 @@ function handleEvent(name, data) {
     }
     case "member_done":
       bumpProgress();
+      setTokens(state.tokens + (data.tokens_used || 0));
       if (!data.success) chamber.setLive(data.key, "failed", "Unavailable");
       transcript.enqueueStatement(data);
       break;
@@ -411,6 +489,9 @@ async function deliver(result, { animate }) {
   await transcript.whenIdle();
   state.result = result;
   els.exportButton.disabled = false;
+  setTokens(resultTokens(result));
+  setMembersStat(result.council_composition?.length || result.round1?.length || 0);
+  if (result.total_latency_s) setStatTime(result.cached ? "Recalled in" : "Last run", formatSeconds(result.total_latency_s));
   const recommendation = recommendationLine(result, 130);
 
   if (animate && !prefersReducedMotion()) {
@@ -471,9 +552,11 @@ async function convene(event) {
   state.research = Boolean(state.config.web_research) && els.research.checked;
   els.exportButton.disabled = true;
   resetStage();
+  setTokens(0);
   evidence.resetStates();
   resetProgress(files.length, state.debate, state.research);
   setRunning(true);
+  startClock();
   setPhase(files.length ? "evidence" : state.research ? "research" : "framing");
   if (files.length) chamber.setStatus("Reading the evidence");
   else if (state.research) chamber.setStatus("Checking what may have changed", "Does this question need current information?");
@@ -500,6 +583,9 @@ async function convene(event) {
     const halted = error.name === "AbortError";
     chamber.reset({ status: halted ? "The session was halted" : "The session ended early", detail: "Nothing was decided" });
     renderRoster();
+    setTokens(0);
+    stopClock();
+    showIdleStats();
     setSession("error", [halted ? "Session halted" : "Session ended early"]);
     if (!halted) showFormError(error.message);
     if (error instanceof ApiError && error.status === 401) {
@@ -507,9 +593,11 @@ async function convene(event) {
       requestAccessKey().then((unlocked) => unlocked && showFormError(""));
     }
   } finally {
+    stopClock();
     setRunning(false);
     state.controller = null;
     refreshHistoryCount();
+    refreshTelemetry();
   }
 }
 
@@ -586,6 +674,14 @@ async function refreshHistoryCount() {
     const records = await fetchHistory(40);
     els.historyCount.hidden = !records.length;
     els.historyCount.textContent = records.length >= 40 ? "40+" : String(records.length);
+    // The median of recent complete deliberations; recalled or partial runs would drag it toward zero.
+    const times = records
+      .map((record) => record.result)
+      .filter((result) => result && !result.cached && !result.degraded && result.total_latency_s > 0)
+      .map((result) => result.total_latency_s)
+      .sort((a, b) => a - b);
+    state.typicalRun = times.length ? times[Math.floor(times.length / 2)] : null;
+    if (!state.running && !state.result) showIdleStats();
   } catch {
     els.historyCount.hidden = true;
   }
@@ -618,6 +714,7 @@ const chamber = new Chamber({
   linesEl: $("debate-lines"),
   statusEl: $("table-status"),
   detailEl: $("table-detail"),
+  tilesEl: $("hud-tiles"),
   pillEl: $("hud-pill"),
   pillTextEl: $("hud-pill-text"),
   onStateChange: onSeatState,
@@ -659,6 +756,7 @@ els.question.addEventListener("keydown", (event) => {
 });
 els.halt.addEventListener("click", () => state.controller?.abort());
 els.skip.addEventListener("click", () => transcript.skip());
+els.catchUp.addEventListener("click", () => transcript.skip());
 els.replay.addEventListener("click", replay);
 els.exportButton.addEventListener("click", () => state.result && downloadBrief(state.result));
 $("history-button").addEventListener("click", () => history.open());
@@ -678,7 +776,10 @@ async function start() {
     listEl: $("transcript"),
     chamber,
     names: names(),
-    onPlaybackChange: (playing) => { els.skip.hidden = !playing; },
+    onPlaybackChange: (playing) => {
+      els.skip.hidden = !playing;
+      els.catchUp.disabled = !playing;
+    },
     onStatement,
   });
   chamber.render(state.config.members, state.config.chairman);
@@ -686,6 +787,10 @@ async function start() {
   evidence.setLimits(state.config.limits);
   els.lock.hidden = !state.config.auth_required;
   els.researchRow.hidden = !state.config.web_research;
+  els.footerResearch.hidden = !state.config.web_research;
+  els.footerResearchSep.hidden = !state.config.web_research;
+  showIdleStats();
+  refreshTelemetry();
   $("evidence-hint").textContent = state.config.limits.max_files
     ? `PDFs up to ${state.config.limits.max_pdf_mb} MB and images up to ${state.config.limits.max_image_mb} MB. The Evidence Reviewer reads every file before the council deliberates.`
     : "";

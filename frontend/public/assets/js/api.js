@@ -66,6 +66,21 @@ export async function fetchConfig() {
   return (await request("/v1/config")).json();
 }
 
+/** Server round-trip time and how many of the council's models are ready or paused. Needs no access key. */
+export async function fetchTelemetry() {
+  const started = performance.now();
+  await request("/v1/health");
+  const latencyMs = Math.round(performance.now() - started);
+  const { models = [] } = await (await request("/v1/providers")).json();
+  const unique = new Map(models.map((model) => [`${model.provider}:${model.model}`, model]));
+  const rows = [...unique.values()];
+  return {
+    latencyMs,
+    ready: rows.filter((model) => model.status === "ok" && model.key_configured !== false).length,
+    paused: rows.filter((model) => model.status === "paused").length,
+  };
+}
+
 export async function fetchHistory(limit = 30) {
   return (await request(`/v1/history?limit=${limit}`)).json();
 }

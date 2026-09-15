@@ -68,6 +68,7 @@
             placeholder="Should we move our 40-person sales team to a new CRM this quarter, or wait until January when pipeline closes?"
             aria-describedby="question-help"></textarea>
           <div class="question-foot">
+            <span id="tokens-note" class="tokens-note" hidden></span>
             <span id="consensus-note" class="consensus-note" hidden></span>
             <span class="char-count" id="char-count" aria-live="polite"></span>
           </div>
@@ -120,30 +121,52 @@
           <kbd class="shortcut" aria-hidden="true">Ctrl ↵</kbd>
         </button>
 
-        <div class="progress-card" id="progress-card" hidden>
-          <div class="progress-head">
-            <span class="progress-title"><span class="pulse-dot" aria-hidden="true"></span><span id="progress-title">Deliberating…</span></span>
-            <span class="progress-value" id="progress-value">0%</span>
+        <div class="run-panel" id="progress-card" hidden>
+          <div class="progress-card">
+            <div class="progress-head">
+              <span class="progress-title"><span class="pulse-dot" aria-hidden="true"></span><span id="progress-title">Deliberating…</span></span>
+              <span class="progress-value" id="progress-value">0%</span>
+            </div>
+            <div class="progress-track" role="progressbar" aria-labelledby="progress-title" aria-valuemin="0" aria-valuemax="100" id="progress-bar">
+              <span class="progress-fill" id="progress-fill"></span>
+            </div>
+            <div class="progress-foot">
+              <span id="progress-stage">Framing the decision</span>
+              <span id="progress-elapsed" class="progress-elapsed">Elapsed 0s</span>
+            </div>
           </div>
-          <div class="progress-track" role="progressbar" aria-labelledby="progress-title" aria-valuemin="0" aria-valuemax="100" id="progress-bar">
-            <span class="progress-fill" id="progress-fill"></span>
-          </div>
-          <div class="progress-foot">
-            <span id="progress-stage">Framing the decision</span>
-            <button type="button" class="halt-button" id="halt-button">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 6h2v8H7zM11 6h2v8h-2z"/></svg>
+          <div class="run-actions">
+            <button type="button" class="run-button" id="halt-button">
+              <svg viewBox="0 0 20 20" aria-hidden="true" class="icon-amber"><path fill-rule="evenodd" clip-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"/></svg>
               Halt session
+            </button>
+            <button type="button" class="run-button is-accent" id="catch-up-button" disabled>
+              <svg viewBox="0 0 20 20" aria-hidden="true" class="icon-emerald"><path d="M4.5 5.2a.75.75 0 011.14-.64l6 4.8a.75.75 0 010 1.28l-6 4.8a.75.75 0 01-1.14-.64V5.2zM13 5a1 1 0 012 0v10a1 1 0 11-2 0V5z"/></svg>
+              Skip to latest
             </button>
           </div>
         </div>
+
+        <dl class="council-stats" aria-label="Council at a glance">
+          <div class="stat-tile">
+            <dt>Members</dt>
+            <dd id="stat-members">4 on call</dd>
+          </div>
+          <div class="stat-tile">
+            <dt>Synthesizer</dt>
+            <dd class="is-amber">Chairman</dd>
+          </div>
+          <div class="stat-tile">
+            <dt id="stat-time-label">Typical run</dt>
+            <dd class="is-green" id="stat-time">—</dd>
+          </div>
+        </dl>
       </form>
     </section>
 
     <!-- The chamber -->
     <section class="stage" aria-label="Council chamber">
       <div class="chamber" id="chamber">
-        <div class="chamber-glow chamber-glow-top" aria-hidden="true"></div>
-        <div class="chamber-glow chamber-glow-bottom" aria-hidden="true"></div>
         <svg class="debate-lines" id="debate-lines" aria-hidden="true"><defs></defs></svg>
 
         <div class="table" aria-hidden="true">
@@ -154,6 +177,7 @@
             <span class="hud-pill" id="hud-pill" hidden><span class="pulse-dot" aria-hidden="true"></span><span id="hud-pill-text"></span></span>
             <p class="hud-title" id="table-status">The council is waiting for a question.</p>
             <p class="hud-detail" id="table-detail"></p>
+            <div class="hud-tiles" id="hud-tiles" hidden></div>
           </div>
         </div>
 
@@ -183,6 +207,23 @@
       </section>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <p class="footer-facts">
+        <span>Multi-agent deliberation suite</span>
+        <span class="footer-sep" aria-hidden="true">•</span>
+        <span>Uploaded files are never stored</span>
+        <span class="footer-sep" aria-hidden="true" id="footer-research-sep" hidden>•</span>
+        <span id="footer-research" hidden>Live web research on</span>
+      </p>
+      <p class="footer-telemetry" id="footer-telemetry" aria-live="off">
+        <span id="footer-latency">Latency: —</span>
+        <span aria-hidden="true">|</span>
+        <span class="is-green" id="footer-models">Models: checking</span>
+      </p>
+    </div>
+  </footer>
 
   <dialog class="drawer" id="history-drawer" aria-labelledby="history-title">
     <div class="drawer-head">

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { friction, mostChallenged } from "../public/assets/js/chamber.js";
 import { briefMarkdown, parseDirective, webSources } from "../public/assets/js/directive.js";
 import { parseInline, parseMarkdown, plainText } from "../public/assets/js/markdown.js";
 import { createSSEParser } from "../public/assets/js/sse.js";
@@ -33,6 +34,23 @@ describe("createSSEParser", () => {
     const { events, parser } = collect();
     parser.push("data: line one\ndata: line two\n\n");
     assert.deepEqual(events, [["message", "line one\nline two"]]);
+  });
+});
+
+describe("chamber telemetry", () => {
+  it("grades friction from the agreement score", () => {
+    assert.deepEqual(friction(0.82), ["Low", "low"]);
+    assert.deepEqual(friction(0.7), ["Low", "low"]);
+    assert.deepEqual(friction(0.5), ["Moderate", "moderate"]);
+    assert.deepEqual(friction(0.41), ["High", "high"]);
+  });
+
+  it("finds the most challenged member, preferring the first on a tie", () => {
+    assert.equal(mostChallenged([]), null);
+    assert.equal(mostChallenged([{ from: "risk", to: "operator" }, { from: "analyst", to: "risk" }]), "operator");
+    assert.equal(mostChallenged([
+      { from: "risk", to: "operator" }, { from: "operator", to: "analyst" }, { from: "researcher", to: "analyst" },
+    ]), "analyst");
   });
 });
 
