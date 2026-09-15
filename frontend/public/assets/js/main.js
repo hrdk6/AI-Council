@@ -28,11 +28,12 @@ const ROLE_FOCUS = {
   risk: "Looks for irreversible downside and sets the conditions for stopping.",
   researcher: "Separates what is known from what is assumed, including in your evidence.",
 };
-const TAGS = { chairman: "CHR", operator: "OPR", analyst: "ANL", risk: "RSK", researcher: "EVD" };
+const TAGS = { chairman: "CHR", operator: "OPR", analyst: "ANL", risk: "RSK", researcher: "EVD", web: "WEB" };
 const STREAM_LENGTH = 4;
 
 const PHASES = {
   evidence: { pill: "Reading evidence", stage: "Reading the evidence" },
+  research: { pill: "Live web research", stage: "Checking current sources" },
   framing: { pill: "Framing", stage: "Framing the decision" },
   opening: { pill: "Round 1 · Opening statements", stage: "Round 1: opening statements", round: 1 },
   cross: { pill: "Round 2 · Cross-examination", stage: "Round 2: cross-examination", round: 2 },
@@ -46,8 +47,9 @@ const state = {
   result: null,
   record: null,
   debate: true,
+  research: true,
   phase: null,
-  progress: { done: 0, total: 1, seats: 3, files: 0 },
+  progress: { done: 0, total: 1, seats: 3, files: 0, research: 0 },
   stream: [],
   turn: 0,
 };
@@ -60,6 +62,8 @@ const els = {
   consensusNote: $("consensus-note"),
   charCount: $("char-count"),
   debate: $("debate-toggle"),
+  research: $("research-toggle"),
+  researchRow: $("research-row"),
   formError: $("form-error"),
   convene: $("convene-button"),
   progressCard: $("progress-card"),
@@ -208,8 +212,9 @@ function onStatement(member) {
 
 /* ── Progress ── */
 
-function resetProgress(files, debate) {
-  state.progress = { done: 0, files, seats: 3, rounds: debate ? 2 : 1 };
+function resetProgress(files, debate, research = false) {
+  // Research counts as three steps (plan, search and read, brief) since it can take a while.
+  state.progress = { done: 0, files, seats: 3, rounds: debate ? 2 : 1, research: research ? 3 : 0 };
   renderProgress();
 }
 
@@ -219,8 +224,8 @@ function bumpProgress(steps = 1) {
 }
 
 function renderProgress() {
-  const { done, files, seats, rounds } = state.progress;
-  const total = files + 1 + seats * rounds + 1;
+  const { done, files, seats, rounds, research } = state.progress;
+  const total = files + research + 1 + seats * rounds + 1;
   const value = Math.min(100, Math.round((Math.min(done, total) / total) * 100));
   els.progressFill.style.width = `${value}%`;
   els.progressValue.textContent = `${value}%`;
@@ -253,6 +258,7 @@ function setRunning(running) {
   els.lockedHead.hidden = !running;
   els.question.readOnly = running;
   els.debate.disabled = running;
+  els.research.disabled = running;
   evidence.lock(running);
   chamber.setActive(running);
 }
@@ -295,6 +301,52 @@ function handleEvent(name, data) {
       bumpProgress();
       announce(`${data.filename} ${data.method === "unreadable" ? "couldn’t be read" : "was read"}.`);
       break;
+    case "research_started":
+      setPhase("research");
+      chamber.setStatus("Checking what may have changed", "Does this question need current information?");
+      break;
+    case "research_skipped":
+      bumpProgress(3);
+      setPhase("framing");
+      chamber.setStatus("Framing the decision", "No current information needed");
+      break;
+    case "research_searching": {
+      bumpProgress();
+      const queries = data.queries ?? [];
+      chamber.setStatus("Searching the web", clip(queries[0], 90));
+      for (const query of queries) pushStream("web", `Searching: ${clip(query, 100)}`);
+      updateStreamMeta();
+      announce(`Searching the web for ${queries.join("; ")}.`);
+      break;
+    }
+    case "research_reading": {
+      bumpProgress();
+      const sources = data.sources ?? [];
+      const read = sources.filter((source) => source.read);
+      for (const source of (read.length ? read : sources).slice(0, 3)) {
+        pushStream("web", `${source.read ? "Read" : "Found"} ${source.domain}: ${clip(source.title, 80)}`);
+      }
+      updateStreamMeta();
+      chamber.setStatus("Condensing what the sources say", [...new Set(sources.map((source) => source.domain))].slice(0, 3).join(" · "));
+      break;
+    }
+    case "research_ready": {
+      bumpProgress(data.status === "ok" ? 1 : 2);
+      const sources = data.sources ?? [];
+      if (data.status === "ok") {
+        const domains = [...new Set(sources.map((source) => source.domain))].slice(0, 4).join(", ");
+        pushStream("web", `Brief ready: ${sources.length} ${sources.length === 1 ? "source" : "sources"} for the council`);
+        transcript.enqueueInterlude(`Before debating, the council checked ${sources.length} current web ${sources.length === 1 ? "source" : "sources"}: ${domains}.`);
+        announce("The web research is ready.");
+      } else {
+        pushStream("web", "Web search unavailable: relying on training knowledge");
+        transcript.enqueueInterlude("Live web search was unavailable, so the council is relying on training knowledge that may be out of date.");
+      }
+      updateStreamMeta();
+      setPhase("framing");
+      chamber.setStatus("Framing the decision", "Choosing who should sit on the council");
+      break;
+    }
     case "cache_hit":
       transcript.enqueueInterlude("This exact question was put to the council recently, so its earlier deliberation is shown.");
       break;
@@ -416,19 +468,23 @@ async function convene(event) {
   state.record = null;
   state.result = null;
   state.debate = els.debate.checked;
+  state.research = Boolean(state.config.web_research) && els.research.checked;
   els.exportButton.disabled = true;
   resetStage();
   evidence.resetStates();
-  resetProgress(files.length, state.debate);
+  resetProgress(files.length, state.debate, state.research);
   setRunning(true);
-  setPhase(files.length ? "evidence" : "framing");
-  chamber.setStatus(files.length ? "Reading the evidence" : "Framing the decision", files.length ? "" : "Choosing who should sit on the council");
+  setPhase(files.length ? "evidence" : state.research ? "research" : "framing");
+  if (files.length) chamber.setStatus("Reading the evidence");
+  else if (state.research) chamber.setStatus("Checking what may have changed", "Does this question need current information?");
+  else chamber.setStatus("Framing the decision", "Choosing who should sit on the council");
   state.controller = new AbortController();
 
   try {
     const result = await streamDecision({
       prompt,
       debate: state.debate,
+      research: state.research,
       files,
       signal: state.controller.signal,
       onEvent: handleEvent,
@@ -462,6 +518,10 @@ async function convene(event) {
 function playResult(result, { animate }) {
   const council = result.council_composition?.length ? result.council_composition : (result.round1 ?? []).map((m) => m.key);
   els.floor.hidden = false;
+  const checked = result.research?.status === "ok" ? result.research.sources?.length ?? 0 : 0;
+  if (checked) {
+    transcript.enqueueInterlude(`Before debating, the council checked ${checked} current web ${checked === 1 ? "source" : "sources"} (searched ${result.research.searched_on}).`);
+  }
   transcript.enqueueAction(() => {
     if (animate) setPhase("opening");
     else chamber.setPill("Round 1 · Opening statements");
@@ -625,6 +685,7 @@ async function start() {
   renderRoster();
   evidence.setLimits(state.config.limits);
   els.lock.hidden = !state.config.auth_required;
+  els.researchRow.hidden = !state.config.web_research;
   $("evidence-hint").textContent = state.config.limits.max_files
     ? `PDFs up to ${state.config.limits.max_pdf_mb} MB and images up to ${state.config.limits.max_image_mb} MB. The Evidence Reviewer reads every file before the council deliberates.`
     : "";

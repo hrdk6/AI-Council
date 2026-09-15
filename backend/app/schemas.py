@@ -24,6 +24,29 @@ class AttachmentSummary(BaseModel):
     note: str | None = None
 
 
+class WebSource(BaseModel):
+    """A web page found during live research. ``read`` is False when only the search snippet was used."""
+
+    title: str
+    url: str
+    domain: str
+    snippet: str = ""
+    published: str | None = None
+    read: bool = False
+
+
+class ResearchSummary(BaseModel):
+    """The live web research the council received before deliberating."""
+
+    status: str  # "ok" | "unavailable"
+    searched_on: str  # ISO date
+    queries: list[str] = Field(default_factory=list)
+    engine: str | None = None
+    sources: list[WebSource] = Field(default_factory=list)
+    brief: str | None = None
+    note: str | None = None
+
+
 class MemberResponse(BaseModel):
     key: str
     role_name: str
@@ -62,6 +85,7 @@ class CouncilResult(BaseModel):
     degraded: bool = False
     sources: list[str] = Field(default_factory=list)
     attachments: list[AttachmentSummary] = Field(default_factory=list)
+    research: ResearchSummary | None = None
 
 
 class DecisionRecord(BaseModel):

@@ -65,6 +65,19 @@ def test_default_chain_has_several_groq_backups():
     assert len(AppConfig().groq_fallback_chain) >= 4
 
 
+def test_web_research_settings():
+    defaults = AppConfig()
+    assert defaults.web_research is True
+    assert defaults.search_engines == ("tavily", "groq", "duckduckgo")
+    config = AppConfig.model_validate({"web_research": "false", "search_engines": "DuckDuckGo, tavily"})
+    assert config.web_research is False
+    assert config.search_engines == ("duckduckgo", "tavily")
+    with pytest.raises(ValidationError, match="SEARCH_ENGINES"):
+        AppConfig.model_validate({"search_engines": "google"})
+    with pytest.raises(ValidationError, match="Invalid provider"):
+        AppConfig.model_validate({"research_provider": "anthropic"})
+
+
 def test_invalid_numbers_raise_clear_errors():
     with pytest.raises(ValidationError, match="rate_limit_requests"):
         AppConfig.model_validate({"rate_limit_requests": "lots"})

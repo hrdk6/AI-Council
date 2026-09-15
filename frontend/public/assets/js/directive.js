@@ -42,10 +42,26 @@ export function parseDirective(text) {
   }));
 }
 
+/** Web sources from a result's research that are safe to link to (http and https only), numbered as the council cited them. */
+export function webSources(result) {
+  const sources = result?.research?.status === "ok" ? result.research.sources ?? [] : [];
+  return sources
+    .map((source, index) => ({ ...source, number: index + 1 }))
+    .filter((source) => /^https?:\/\//i.test(String(source.url ?? "")));
+}
+
 export function briefMarkdown(result) {
   const lines = [`# ${result.question || "Council decision"}`, ""];
   for (const { heading, content } of parseDirective(result.final_answer)) {
     lines.push(`## ${heading}`, "", content, "");
+  }
+  const sources = webSources(result);
+  if (sources.length) {
+    lines.push(`## Web sources (checked ${result.research.searched_on})`, "");
+    for (const source of sources) {
+      lines.push(`${source.number}. [${source.title.replace(/[[\]]/g, "")}](${source.url})${source.published ? `, published ${source.published}` : ""}`);
+    }
+    lines.push("");
   }
   if (result.attachments?.length) {
     lines.push("## Evidence reviewed", "");

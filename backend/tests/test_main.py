@@ -317,6 +317,76 @@ def test_public_config_describes_ui_without_secrets(test_client):
     assert "test-api-key" not in str(data)
 
 
+class TestWebResearch:
+    @pytest.fixture
+    def research_client(self, monkeypatch, tmp_path):
+        from app.schemas import ResearchSummary, WebSource
+
+        main = _load_app(monkeypatch, tmp_path, WEB_RESEARCH="true")
+        summary = ResearchSummary(
+            status="ok", searched_on="2026-09-14", queries=["OpenAI latest model 2026"], engine="groq",
+            sources=[WebSource(title="GPT-6 Astra", url="https://openai.com/index/gpt-6-astra/", domain="openai.com", read=True)],
+            brief="- GPT-6 Astra is OpenAI's newest model [1].",
+        )
+
+        async def fake_research(prompt, on_event=None, request_id="-"):
+            if on_event is not None:
+                await on_event("research_started", {})
+                await on_event("research_ready", summary.model_dump())
+            return summary
+
+        research_mock = AsyncMock(side_effect=fake_research)
+        run_mock = AsyncMock(side_effect=lambda *args, **kwargs: _result())
+        monkeypatch.setattr(main, "run_research", research_mock)
+        monkeypatch.setattr(main, "run_council", run_mock)
+        with TestClient(main.app) as client:
+            yield client, research_mock, run_mock
+
+    def test_research_reaches_the_council_and_the_result(self, research_client):
+        client, _, run_mock = research_client
+        response = client.post("/v1/ask", data={"prompt": "whats openai's latest llm?"}, headers=API_HEADERS)
+        assert response.status_code == 200
+        context = run_mock.await_args.kwargs["context"]
+        assert context.startswith("LIVE WEB RESEARCH")
+        assert "[1] GPT-6 Astra (openai.com) https://openai.com/index/gpt-6-astra/" in context
+        assert response.json()["research"]["sources"][0]["domain"] == "openai.com"
+
+    def test_research_can_be_turned_off_per_request(self, research_client):
+        client, research_mock, run_mock = research_client
+        response = client.post("/v1/ask", data={"prompt": "Test", "research": "false"}, headers=API_HEADERS)
+        assert response.status_code == 200
+        research_mock.assert_not_called()
+        assert run_mock.await_args.kwargs["context"] is None
+        assert response.json()["research"] is None
+
+    def test_stream_emits_research_before_deliberation(self, research_client):
+        client, _, run_mock = research_client
+
+        async def fake_run(prompt, context=None, debate=False, on_event=None):
+            await on_event("charter_ready", {"council": ["risk"]})
+            return _result()
+
+        run_mock.side_effect = fake_run
+        response = client.post("/v1/ask/stream", data={"prompt": "Latest model?"}, headers=API_HEADERS)
+        names = [name for name, _ in _parse_sse(response.text)]
+        assert names == ["research_started", "research_ready", "charter_ready", "complete"]
+
+    def test_config_reports_web_research(self, research_client):
+        client, _, _ = research_client
+        assert client.get("/v1/config").json()["web_research"] is True
+
+
+def test_web_research_disabled_by_setting(test_client, monkeypatch):
+    from app import main
+
+    client, _ = test_client
+    research_mock = AsyncMock()
+    monkeypatch.setattr(main, "run_research", research_mock)
+    assert client.get("/v1/config").json()["web_research"] is False
+    assert client.post("/v1/ask", data={"prompt": "Latest model?"}, headers=API_HEADERS).status_code == 200
+    research_mock.assert_not_called()
+
+
 class TestUploads:
     @pytest.fixture
     def vision(self, monkeypatch):

@@ -30,6 +30,29 @@ The animation is driven by live server events. Members work in parallel, and the
 statement the floor in the order it finished, so several answers arriving at once still read as a debate.
 Past decisions can be reopened and replayed.
 
+## Live web research
+
+Language models only know what was in their training data, so on their own they present stale facts
+(last year's model, old prices) as current. The council handles this in two ways:
+
+- **Every model is told today's date**, and that anything time-sensitive may have changed since it was trained.
+- **For questions that depend on current facts** (releases, prices and plans, product comparisons, news, laws), the
+  council researches the web before it deliberates:
+  1. A planner decides whether the question needs current information and writes up to three searches. Questions
+     that don't need it, such as personal or strategic decisions, skip this step.
+  2. The first engine that works finds and reads the pages: **Tavily** when `TAVILY_API_KEY` is set, then **Groq's
+     built-in browser search** (uses your Groq key), then **DuckDuckGo** (no key).
+  3. A research analyst condenses the pages into a short brief with numbered citations. Every member and the
+     Chairman receive it, with an instruction to prefer official, newer sources.
+
+The chamber shows the searches and the pages being read as they happen. The directive lists every source under
+"Checked on the web", and the exported brief includes them. If search is unavailable, the directive says so rather
+than presenting remembered facts as current. Turn research off per question with the **Live web research** toggle,
+or for the whole server with `WEB_RESEARCH=false`.
+
+Pages are fetched only from public addresses (private, loopback, and cloud metadata addresses are refused, including
+after redirects), limited in size and time, and labelled as untrusted content in every prompt.
+
 ## Evidence uploads
 
 Attach up to 5 files by choosing, dragging, or pasting them.
@@ -50,8 +73,9 @@ because it's password-protected, the council continues with the rest and tells y
 ```
 Browser ──► FastAPI (one process, port 8000)
             ├── /            web interface (static HTML, CSS, and JavaScript; no build step)
-            ├── /v1/ask/stream   Server-Sent Events: evidence → charter → statements → challenges → directive
+            ├── /v1/ask/stream   Server-Sent Events: evidence → research → charter → statements → challenges → directive
             ├── attachments.py   PDF/image extraction and the vision model
+            ├── research.py      live web research: plan, search, read pages, cited brief
             ├── council.py       orchestration, retries, model fallback, consensus scoring
             └── history.py       SQLite decision history
 ```
@@ -114,7 +138,8 @@ One web service runs both the API and the interface.
 | Start command | (from Dockerfile) | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers` |
 | Health check path | `/v1/health` | `/v1/health` |
 
-Environment variables: `GROQ_API_KEY`, `FORWARDED_ALLOW_IPS=*` (so rate limits apply per visitor rather
+Environment variables: `GROQ_API_KEY`, optionally `TAVILY_API_KEY` (the most reliable web research engine; DuckDuckGo
+often throttles cloud servers), `FORWARDED_ALLOW_IPS=*` (so rate limits apply per visitor rather
 than to Render's proxy), and either `ENVIRONMENT=production` with an `API_KEY` for a private council, or
 `ENVIRONMENT=staging` without one for an open demo. Render's free instances have no persistent disk, so
 decision history resets on each deploy or restart unless you attach a disk and point `DATABASE_PATH` at it.
@@ -133,6 +158,9 @@ Every setting is an environment variable; see [.env.example](.env.example) for t
 | `BACKUP_MODELS` | Optional cross-provider backups as `provider:model`, e.g. `gemini:gemini-2.5-flash`. Used only when that provider's key is set. |
 | `RATE_LIMIT_COOLDOWN_S` | How long a rate-limited model is skipped when the provider gives no retry time (default 30). |
 | `REASONING_EFFORT` | Reasoning effort for `gpt-oss` models (default `low`). |
+| `WEB_RESEARCH` | Live web research for time-sensitive questions (default `true`). |
+| `SEARCH_ENGINES` / `TAVILY_API_KEY` | Research engines in order (`tavily,groq,duckduckgo`); Tavily is used only when its key is set. |
+| `RESEARCH_MODEL`, `RESEARCH_BROWSER_MODELS`, `RESEARCH_MAX_SOURCES` | The planner and brief model, the Groq models that browse, and how many sources to cite. |
 | `VISION_MODELS` | Vision models for images and scanned PDFs, tried in order. |
 | `MAX_UPLOAD_FILES`, `MAX_PDF_MB`, `MAX_IMAGE_MB`, `MAX_PDF_PAGES`, `MAX_OCR_PAGES` | Upload limits. Set `MAX_UPLOAD_FILES=0` to turn uploads off. |
 | `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW` | Per-IP limit on council runs (default 10 per 60 seconds). |
@@ -151,14 +179,15 @@ Invalid values stop startup with a message naming the setting.
 | GET | `/v1/health` | – | Liveness (`degraded` if a provider in use has no key). |
 | GET | `/v1/ready` | – | Readiness: 503 until provider keys and the database are usable. |
 | GET | `/v1/config` | – | What the interface needs: members, upload limits, whether a key is required. |
-| POST | `/v1/ask` | ✓ | Multipart form: `prompt`, `debate` (bool), `files` (repeatable), `sources` (newline-separated URLs). Returns the full result. |
+| POST | `/v1/ask` | ✓ | Multipart form: `prompt`, `debate` (bool), `research` (bool, default true), `files` (repeatable), `sources` (newline-separated URLs). Returns the full result, including `research` (brief and sources). |
 | POST | `/v1/ask/stream` | ✓ | Same inputs, streamed as Server-Sent Events. |
 | GET | `/v1/history?limit=30` | ✓ | Recent decisions. |
 | GET | `/v1/history/{id}` | ✓ | One decision. |
 | POST | `/v1/history/{id}/feedback` | ✓ | JSON `{"rating": 1-5, "outcome_note": "..."}`. |
 | GET | `/v1/metrics` | ✓ | Request, cache, HTTP, and per-provider token metrics. |
 
-**Stream events**, in order: `evidence_started` / `evidence_ready` per file, `charter_ready` (the seated
+**Stream events**, in order: `evidence_started` / `evidence_ready` per file, `research_started`, then either
+`research_skipped` or `research_searching` / `research_reading` / `research_ready`, `charter_ready` (the seated
 council), `member_started` / `member_done` per member and round (round-2 results include `challenges`),
 `consensus_update` after each round, `debate_skipped` or `debate_started`, `synthesis_started`, and finally `complete` (the full result) or `error`.
 

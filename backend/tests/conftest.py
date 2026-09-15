@@ -18,17 +18,23 @@ _TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="ai-council-tests-"))
 os.environ["DATABASE_PATH"] = str(_TEST_DATA_DIR / "test.db")
 os.environ["ENVIRONMENT"] = "test"
 os.environ["API_KEY"] = ""
+# Tests never search the web; research tests turn it on and mock the network.
+os.environ["WEB_RESEARCH"] = "false"
+os.environ.pop("TAVILY_API_KEY", None)
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def clear_config_cache():
-    """Clear config cache and shared model cooldowns between tests."""
+    """Clear config cache, shared model cooldowns, and search engine pauses between tests."""
     from app.config import get_config
+    from app.research import reset_engine_health
     from app.routing import MODEL_HEALTH
     get_config.cache_clear()
     MODEL_HEALTH.reset()
+    reset_engine_health()
     yield
     MODEL_HEALTH.reset()
+    reset_engine_health()
     get_config.cache_clear()

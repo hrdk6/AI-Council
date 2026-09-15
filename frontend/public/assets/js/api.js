@@ -79,10 +79,11 @@ export async function saveFeedback(decisionId, rating, outcomeNote) {
 }
 
 /** Submit a decision and call onEvent(name, payload) for each progress event. Resolves with the result. */
-export async function streamDecision({ prompt, debate, files, onEvent, signal }) {
+export async function streamDecision({ prompt, debate, research = true, files, onEvent, signal }) {
   const form = new FormData();
   form.append("prompt", prompt);
   form.append("debate", String(debate));
+  form.append("research", String(research));
   for (const file of files) form.append("files", file, file.name);
 
   const response = await request("/v1/ask/stream", { method: "POST", body: form, signal });

@@ -43,6 +43,7 @@ from .config import CHAIRMAN, EXPERT_LIBRARY, all_role_configs, cfg, providers_i
 from .council import CouncilUnavailableError, run_council
 from .history import check_database, get_decision, list_decisions, save_decision, save_feedback
 from .observability import METRICS, REQUEST_ID, new_request_id, setup_logging
+from .research import build_research_context, run_research
 from .routing import MODEL_HEALTH, ModelRef, candidates_for
 from .schemas import CouncilResult, DecisionRecord, FeedbackInput, HealthResponse
 
@@ -298,6 +299,7 @@ async def public_config():
         "auth_required": bool(cfg.api_key),
         "members": [{"key": key, "role_name": role.role_name} for key, role in EXPERT_LIBRARY.items()],
         "chairman": {"key": "chairman", "role_name": CHAIRMAN.role_name},
+        "web_research": cfg.web_research,
         "limits": {
             "max_prompt_chars": cfg.max_prompt_chars,
             "max_files": cfg.max_upload_files,
@@ -379,14 +381,18 @@ async def _run_and_save(
         sources: list[str],
         on_event=None,
         uploads: list[tuple[str, str, bytes]] | None = None,
+        research: bool = True,
 ) -> CouncilResult:
-    contexts = []
+    attachments = await process_attachments(uploads, on_event, REQUEST_ID.get()) if uploads else []
+    findings = await run_research(prompt, on_event, REQUEST_ID.get()) if research and cfg.web_research else None
+
+    # Research goes first so the context budget never truncates it away behind long uploads.
+    contexts = [context for context in [build_research_context(findings)] if context]
     if sources:
         contexts.append(
             "USER-SUPPLIED SOURCES (cite only when directly supported; do not claim to have read a link):\n"
             + "\n".join(f"- {source}" for source in sources)
         )
-    attachments = await process_attachments(uploads, on_event, REQUEST_ID.get()) if uploads else []
     if evidence := build_evidence_context(attachments):
         contexts.append(evidence)
 
@@ -395,6 +401,7 @@ async def _run_and_save(
     )
     result.sources = sources
     result.attachments = [attachment.summary() for attachment in attachments]
+    result.research = findings
     try:
         await asyncio.to_thread(save_decision, result)
     except Exception:
@@ -412,13 +419,14 @@ async def ask(
     request: Request,
     prompt: str = Form(...),
     debate: bool = Form(False),
+    research: bool = Form(True, description="Search the web first when the question depends on current facts"),
     sources: str = Form(""),
     files: list[UploadFile] | None = File(None, description="PDFs and images for the council to read"),
 ):
     clean_prompt, parsed_sources = _validate_submission(prompt, sources)
     uploads = await _read_uploads(files)
     try:
-        return await _run_and_save(clean_prompt, debate, parsed_sources, uploads=uploads)
+        return await _run_and_save(clean_prompt, debate, parsed_sources, uploads=uploads, research=research)
     except CouncilUnavailableError as error:
         logger.warning("Council unavailable: %s", error)
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -433,13 +441,16 @@ async def ask_stream(
     request: Request,
     prompt: str = Form(...),
     debate: bool = Form(False),
+    research: bool = Form(True, description="Search the web first when the question depends on current facts"),
     sources: str = Form(""),
     files: list[UploadFile] | None = File(None, description="PDFs and images for the council to read"),
 ):
     """Stream lifecycle events as SSE so clients can show deliberation progress.
 
     Events, in order of appearance: ``evidence_started`` / ``evidence_ready`` (per upload),
-    ``charter_ready``, ``member_started`` / ``member_done`` (per member, per round), ``consensus_update``
+    ``research_started``, then ``research_skipped`` or ``research_searching`` / ``research_reading`` /
+    ``research_ready``, ``charter_ready``, ``member_started`` / ``member_done`` (per member, per round),
+    ``model_switched``, ``consensus_update``
     (after each round), ``debate_skipped``
     or ``debate_started``, ``synthesis_started``, ``cache_hit``, then a terminal ``complete`` or ``error``.
     Comment lines (``: keep-alive``) are sent periodically so proxies keep the connection open.
@@ -454,7 +465,7 @@ async def ask_stream(
             if event != "final":  # the full result is sent once, as the terminal "complete" event
                 await queue.put((event, data))
 
-        task = asyncio.create_task(_run_and_save(clean_prompt, debate, parsed_sources, on_event, uploads))
+        task = asyncio.create_task(_run_and_save(clean_prompt, debate, parsed_sources, on_event, uploads, research))
         last_sent = time.monotonic()
         try:
             yield ": stream-open\n\n"

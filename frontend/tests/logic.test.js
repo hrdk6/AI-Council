@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { briefMarkdown, parseDirective } from "../public/assets/js/directive.js";
+import { briefMarkdown, parseDirective, webSources } from "../public/assets/js/directive.js";
 import { parseInline, parseMarkdown, plainText } from "../public/assets/js/markdown.js";
 import { createSSEParser } from "../public/assets/js/sse.js";
 
@@ -94,5 +94,30 @@ describe("parseDirective", () => {
     assert.match(brief, /^# Hire or buy ads\?/);
     assert.match(brief, /## Recommendation\n\nHire\./);
     assert.match(brief, /- budget\.pdf/);
+  });
+
+  it("lists web sources with their citation numbers and drops unsafe links", () => {
+    const result = {
+      question: "Latest model?",
+      final_answer: "Recommendation\nUse it [2].",
+      research: {
+        status: "ok",
+        searched_on: "2026-09-14",
+        sources: [
+          { title: "Bad", url: "javascript:alert(1)" },
+          { title: "Launch [post]", url: "https://example.com/launch", published: "2026-09-03" },
+        ],
+      },
+    };
+    assert.deepEqual(webSources(result).map((s) => [s.number, s.url]), [[2, "https://example.com/launch"]]);
+    const brief = briefMarkdown(result);
+    assert.match(brief, /## Web sources \(checked 2026-09-14\)/);
+    assert.match(brief, /2\. \[Launch post\]\(https:\/\/example\.com\/launch\), published 2026-09-03/);
+    assert.doesNotMatch(brief, /javascript:/);
+  });
+
+  it("shows no web sources when research was unavailable", () => {
+    assert.deepEqual(webSources({ research: { status: "unavailable", sources: [{ title: "x", url: "https://x.com" }] } }), []);
+    assert.deepEqual(webSources({}), []);
   });
 });

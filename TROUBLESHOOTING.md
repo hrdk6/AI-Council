@@ -7,6 +7,7 @@ Common issues and solutions for AI Council.
 - [Startup Problems](#startup-problems)
 - [Runtime Errors](#runtime-errors)
 - [Performance Issues](#performance-issues)
+- [Web Research Issues](#web-research-issues)
 - [Auto-Switching Issues](#auto-switching-issues)
 - [Development Issues](#development-issues)
 
@@ -277,6 +278,36 @@ COUNCIL_CACHE_MAXSIZE=50  # Default: 200
 ```bash
 DEBATE_CONCURRENCY_LIMIT=1  # Default: 2
 ```
+
+---
+
+## Web Research Issues
+
+### Answers about recent events look out of date
+
+The models' own knowledge stops at their training cutoff. Current facts come from the live web research step:
+
+1. Make sure **Live web research** is switched on under Protocol modifiers, and `WEB_RESEARCH` isn't `false`.
+2. Look for "Checked on the web" under the directive. If a notice says web search was unavailable, see below.
+3. Research runs only when the planner decides the question depends on current information. Naming the product
+   and saying "latest", "today", or "pricing" makes that unambiguous.
+
+### "Live web search was unavailable"
+
+Check the server logs for `research` lines. Common causes:
+
+- **Groq browser search rate-limited.** It uses a lot of gpt-oss tokens per question, so on the free tier two
+  questions within a minute can exhaust it. Wait a minute, or add a Tavily key.
+- **DuckDuckGo responded with 202.** DuckDuckGo throttles automated traffic, especially from cloud servers such
+  as Render. It is only the last resort.
+- **Most reliable fix:** get a free API key at [tavily.com](https://tavily.com) and set `TAVILY_API_KEY`. Tavily is
+  tried first whenever the key is set.
+
+### Council members switch to backup models right after research
+
+Expected with the `groq` engine: browser search spends much of gpt-oss-120b's per-minute token limit, so members on
+that model move to a backup for the next minute. Set `TAVILY_API_KEY` to avoid it, or change
+`RESEARCH_BROWSER_MODELS` to put `openai/gpt-oss-20b` first.
 
 ---
 

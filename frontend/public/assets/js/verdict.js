@@ -1,7 +1,7 @@
 // The Chairman's directive: recommendation, reasoning, plan, guardrails, and outcome feedback.
 
 import { saveFeedback } from "./api.js";
-import { briefMarkdown, parseDirective } from "./directive.js";
+import { briefMarkdown, parseDirective, webSources } from "./directive.js";
 import { h, inlineNodes, percent, prefersReducedMotion, renderMarkdown } from "./dom.js";
 import { parseMarkdown, plainText } from "./markdown.js";
 
@@ -24,6 +24,8 @@ function summarySentence(result) {
   }
   if (figures.length) sentence += `${sentence ? "; " : ""}${figures.join(", ")}`;
   if (result.total_latency_s) sentence += ` in ${Math.round(result.total_latency_s)} seconds`;
+  const checked = webSources(result).length;
+  if (checked) sentence += `${sentence ? ", " : ""}after checking ${checked} current web ${checked === 1 ? "source" : "sources"}`;
   if (result.cached) sentence += ". This question was answered recently, so the earlier deliberation is shown";
   return sentence ? `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.` : "";
 }
@@ -132,6 +134,27 @@ export function renderVerdict(container, result, { animate = true, record = null
     confidence && h("section", { class: "directive-section" }, h("h3", { text: "Confidence and key uncertainty" }), h("div", { class: "prose" }, renderMarkdown(confidence))),
   );
 
+  const sources = webSources(result);
+  const research = sources.length
+    ? h("section", { class: "web-sources", "aria-labelledby": "web-sources-title" },
+      h("div", { class: "web-sources-head" },
+        h("h3", { id: "web-sources-title", text: "Checked on the web" }),
+        h("span", { class: "mono-muted", text: `Searched ${result.research.searched_on}` })),
+      h("ol", { class: "web-source-list" }, sources.map((source) => h("li", { class: "web-source" },
+        h("span", { class: "web-source-number", text: String(source.number) }),
+        h("span", { class: "web-source-body" },
+          h("a", { href: source.url, target: "_blank", rel: "noopener noreferrer", text: source.title || source.domain }),
+          h("span", { class: "web-source-meta", text: [source.domain, source.published && `published ${source.published}`, !source.read && "search result only"].filter(Boolean).join(" · ") }))))),
+      result.research.brief
+        ? h("details", { class: "web-brief" },
+          h("summary", { text: "What the research found" }),
+          h("div", { class: "prose" }, renderMarkdown(result.research.brief)))
+        : null)
+    : null;
+  const researchNotice = result.research?.status === "unavailable"
+    ? h("p", { class: "notice", role: "note", text: result.research.note || "Live web search was unavailable, so this directive relies on the models’ training knowledge, which may be out of date." })
+    : null;
+
   const evidence = result.attachments?.length
     ? h("div", { class: "evidence-used" },
       h("h3", { text: "Evidence the council read" }),
@@ -149,7 +172,9 @@ export function renderVerdict(container, result, { animate = true, record = null
     h("div", { class: "directive-recommendation" }, renderMarkdown(recommendation ?? result.final_answer ?? "")),
     h("p", { class: "directive-summary", text: summarySentence(result) }),
     notice,
+    researchNotice,
     body,
+    research,
     evidence,
     actions,
   ].filter(Boolean));

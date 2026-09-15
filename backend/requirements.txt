@@ -5,6 +5,7 @@ python-dotenv>=1.0.1,<2.0
 python-multipart>=0.0.9
 pydantic>=2.7.0,<3.0
 slowapi>=0.1.9,<0.2
+httpx>=0.27.0,<1.0  # live web research: search engines and reading pages
 # Evidence uploads
 pypdf>=5.0.0,<7.0
 cryptography>=42.0.0  # opens AES-encrypted PDFs that have no user password

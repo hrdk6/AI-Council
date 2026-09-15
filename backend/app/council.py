@@ -7,6 +7,7 @@ import re
 import statistics
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 from .cache import COUNCIL_RESULT_CACHE
@@ -121,6 +122,18 @@ def _strip_think_tags(text: str | None) -> str:
     cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL | re.IGNORECASE).strip()
 
     return cleaned
+
+
+def current_date_note(now: datetime | None = None) -> str:
+    """Tell a model today's date: without it, models present their training snapshot as the present."""
+    today = now or datetime.now(UTC)
+    return (
+        f"Today's date is {today:%A}, {today.day} {today:%B %Y} (UTC). Your training data ends before today, so "
+        "facts that change over time (releases, versions, prices, plans, news, who holds a role) may have changed. "
+        "For those, rely on the LIVE WEB RESEARCH section when it is provided, cite its source numbers, and prefer "
+        "its newest dated information. When it is not provided, do not present remembered details as current: "
+        "say they may be out of date."
+    )
 
 
 def _reasoning_options(ref: ModelRef) -> dict:
@@ -349,7 +362,7 @@ async def _call_text(
             response = await get_client(ref.provider).chat.completions.create(
                 model=ref.model,
                 messages=[
-                    {"role": "system", "content": model_cfg.system_prompt},
+                    {"role": "system", "content": f"{model_cfg.system_prompt}\n\n{current_date_note()}"},
                     {"role": "user", "content": user_prompt},
                 ],
                 max_tokens=token_budget,
